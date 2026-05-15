@@ -42,8 +42,12 @@ scripts/smoke_check.py
 - `KairosPaths` 与 `ensure_workspace`
 - `InboundMessage` 与 `OutboundMessage`
 - `AgentLoop` 占位
+- `SessionStore` 与 `SessionEvent`
 - `ToolRegistry`、`ToolSpec`、`ToolResult`
+- `ToolRouter` 与 `ToolExecutionResult`
 - `PermissionManager`、`AutonomyLevel`
+- `AuditLogger` 与 `AuditEvent`
+- `build_native_registry`
 
 其他 worker 应优先复用这些契约，不要平行创建另一套消息、路径或权限类型。
 
@@ -171,6 +175,8 @@ Risks / TODO:
 
 ```text
 python scripts/smoke_check.py
+python -m pytest tests/test_core_runtime.py
 PYTHONPATH=src python -m kairos.cli status
+PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli init --root <temp-dir>
 ```

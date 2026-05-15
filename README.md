@@ -33,6 +33,18 @@ src/kairos/
 
 ```text
 python scripts/smoke_check.py
+PYTHONPATH=src python -m kairos.cli tools
+PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
 ```
 
 For direct module execution before installing the package, set `PYTHONPATH=src`.
+
+## Commander Contracts
+
+The current commander-owned runtime contracts include:
+
+- append-only JSONL sessions via `SessionStore`,
+- native tool registration via `build_native_registry`,
+- permission-gated tool execution via `ToolRouter`,
+- JSONL audit logs via `AuditLogger`,
+- project-root constrained file tools.
