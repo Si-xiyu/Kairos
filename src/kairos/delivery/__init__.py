@@ -1,4 +1,12 @@
-"""Reliable outbound delivery queue.
+"""Reliable outbound delivery queue."""
 
-Assigned implementation owner: Codex task brief.
-"""
+from .queue import BACKOFF_SECONDS, MAX_RETRIES, DeliveryQueue, QueuedDelivery
+from .runner import DeliveryRunner
+
+__all__ = [
+    "BACKOFF_SECONDS",
+    "MAX_RETRIES",
+    "DeliveryQueue",
+    "DeliveryRunner",
+    "QueuedDelivery",
+]
