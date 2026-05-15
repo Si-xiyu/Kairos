@@ -1,141 +1,76 @@
-"""Daily journal storage."""
+from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from typing import Optional
 
+from kairos.config import KairosPaths
 
-DEFAULT_TEMPLATE = """# {date}
-
-## 今天发生了什么
-
-## 我在想什么
-
-## 做了哪些事情
-
-## 情绪与能量
-
-## 有价值的对话
-
-## Kairos 的观察
-
-## 明天可以轻轻推进的事
-"""
+DEFAULT_SECTIONS = [
+    "今天发生了什么",
+    "我在想什么",
+    "做了哪些事情",
+    "情绪与能量",
+    "有价值的对话",
+    "Kairos 的观察",
+    "明天可以轻轻推进的事",
+]
 
 
 class DailyJournalStore:
-    """Store for daily markdown journals."""
-
-    def __init__(self, base_dir: Path | None = None):
-        """Initialize with base directory for journal storage.
-
-        If not provided, uses .kairos/journal in current directory.
-        """
+    def __init__(self, paths: KairosPaths | None = None, base_dir: Path | None = None) -> None:
         if base_dir is None:
-            base_dir = Path(".kairos/journal")
+            base_dir = paths.journal if paths is not None else Path(".kairos/journal")
         self.base_dir = Path(base_dir)
 
-    def _journal_dir(self, journal_date: date) -> Path:
-        """Get directory for a journal date."""
-        return self.base_dir / str(journal_date.year) / f"{journal_date.month:02d}"
+    def path_for(self, journal_date: date) -> Path:
+        return (
+            self.base_dir
+            / f"{journal_date.year:04d}"
+            / f"{journal_date.month:02d}"
+            / f"{journal_date.isoformat()}.md"
+        )
 
-    def path_for(self, journal_date: date | None = None) -> Path:
-        """Get the path for a journal date.
-
-        If date not provided, uses today.
-        """
-        if journal_date is None:
-            journal_date = date.today()
-        return self._journal_dir(journal_date) / f"{journal_date.isoformat()}.md"
-
-    def exists(self, journal_date: date | None = None) -> bool:
-        """Check if a journal exists for the given date."""
+    def exists(self, journal_date: date) -> bool:
         return self.path_for(journal_date).exists()
 
-    def create(
-        self, journal_date: date | None = None, template: str | None = None
-    ) -> Path:
-        """Create a new daily journal.
+    def create(self, journal_date: date, sections: list[str] | None = None) -> Path:
+        sections = sections or DEFAULT_SECTIONS
+        path = self.path_for(journal_date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return path
+        content = [f"# {journal_date.isoformat()}", ""]
+        for section in sections:
+            content.extend([f"## {section}", ""])
+        path.write_text("\n".join(content).rstrip() + "\n", encoding="utf-8")
+        return path
 
-        Returns the path where the journal was created.
-        """
-        if journal_date is None:
-            journal_date = date.today()
-
-        journal_path = self.path_for(journal_date)
-        journal_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if template is None:
-            template = DEFAULT_TEMPLATE
-
-        content = template.format(date=journal_date.isoformat())
-        journal_path.write_text(content, encoding="utf-8")
-
-        return journal_path
-
-    def append_fragment(
-        self, journal_date: date | None, heading: str, text: str
-    ) -> Path:
-        """Append text under a heading in a journal.
-
-        If the journal doesn't exist, it will be created.
-        If the heading doesn't exist, it will be added.
-        """
-        if journal_date is None:
-            journal_date = date.today()
-
-        journal_path = self.path_for(journal_date)
-
-        if not journal_path.exists():
-            self.create(journal_date)
-
-        # Read existing content
-        content = journal_path.read_text(encoding="utf-8")
-
-        # Check if heading exists
+    def append_fragment(self, journal_date: date, heading: str, text: str) -> Path:
+        path = self.create(journal_date)
+        content = path.read_text(encoding="utf-8")
         heading_line = f"## {heading}"
-        if heading_line in content:
-            # Append to existing heading
-            lines = content.split("\n")
-            new_lines: list[str] = []
-            in_target_heading = False
+        if heading_line not in content:
+            content = content.rstrip() + f"\n\n{heading_line}\n\n{text.strip()}\n"
+            path.write_text(content, encoding="utf-8")
+            return path
 
-            for line in lines:
-                if line.strip() == heading_line:
-                    in_target_heading = True
-                    new_lines.append(line)
-                elif in_target_heading and line.startswith("## "):
-                    in_target_heading = False
-                    # Add text before new heading
-                    new_lines.append("")
-                    new_lines.append(text)
-                    new_lines.append("")
-                    new_lines.append(line)
-                elif in_target_heading and line.strip():
-                    # Continue in heading, append after existing text
-                    new_lines.append(line)
-                elif in_target_heading and not line.strip():
-                    # Empty line in heading, add our text here
-                    new_lines.append(text)
-                    new_lines.append("")
-                    in_target_heading = False
-                else:
-                    new_lines.append(line)
+        lines = content.splitlines()
+        insert_at = len(lines)
+        for index, line in enumerate(lines):
+            if line.strip() != heading_line:
+                continue
+            insert_at = len(lines)
+            for next_index in range(index + 1, len(lines)):
+                if lines[next_index].startswith("## "):
+                    insert_at = next_index
+                    break
+            break
+        lines[insert_at:insert_at] = ["", text.strip(), ""]
+        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return path
 
-            content = "\n".join(new_lines)
-        else:
-            # Add new heading
-            content = content.rstrip() + f"\n\n{heading_line}\n\n{text}\n"
-
-        journal_path.write_text(content, encoding="utf-8")
-        return journal_path
-
-    def read(self, journal_date: date | None = None) -> str:
-        """Read a journal by date.
-
-        Returns empty string if not found.
-        """
-        journal_path = self.path_for(journal_date)
-        if not journal_path.exists():
+    def read(self, journal_date: date) -> str:
+        path = self.path_for(journal_date)
+        if not path.exists():
             return ""
-        return journal_path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")

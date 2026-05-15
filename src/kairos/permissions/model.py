@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Literal
 
-from kairos.tools.registry import RiskLevel
-
 Decision = Literal["allow", "ask", "deny"]
+RiskLevel = Literal["low", "medium", "high", "critical"]
 
 
 class AutonomyLevel(IntEnum):
@@ -31,6 +30,12 @@ class PermissionManager:
     def decide(self, risk_level: RiskLevel) -> PermissionDecision:
         if risk_level == "low" and self.autonomy_level >= AutonomyLevel.LOW_RISK_AUTO:
             return PermissionDecision("allow", "Low-risk tool allowed by autonomy level.")
+        if risk_level == "medium" and self.autonomy_level >= AutonomyLevel.APPROVED_SCOPE_AUTO:
+            return PermissionDecision("allow", "Medium-risk tool allowed by approved scope autonomy.")
+        if risk_level == "high" and self.autonomy_level >= AutonomyLevel.HIGH_AUTONOMY_AGENT:
+            return PermissionDecision("allow", "High-risk tool allowed by high autonomy mode.")
+        if risk_level == "critical":
+            return PermissionDecision("ask", "Critical-risk tool always requires explicit approval.")
         if risk_level in {"high", "critical"} and self.autonomy_level < AutonomyLevel.APPROVED_SCOPE_AUTO:
             return PermissionDecision("ask", "High-risk tool requires explicit approval.")
         if self.autonomy_level == AutonomyLevel.PASSIVE:

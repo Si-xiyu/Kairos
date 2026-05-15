@@ -1,149 +1,112 @@
-"""Memory storage layer."""
+from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
-from kairos.memory.model import MemoryEntry, MemoryType, MemoryScope
+from kairos.config import KairosPaths
+from kairos.memory.model import MemoryEntry, MemoryType
+
+AUTO_CANDIDATE_TYPES = {
+    MemoryType.LIFE_PATTERN,
+    MemoryType.ENERGY_PATTERN,
+    MemoryType.REFLECTION_THEME,
+}
 
 
 class MemoryStore:
-    """Store for memory entries with frontmatter + content format."""
-
-    def __init__(self, base_dir: Path | None = None):
-        """Initialize with base directory for memory storage.
-
-        If not provided, uses .kairos/memory in current directory.
-        """
+    def __init__(self, paths: KairosPaths | None = None, base_dir: Path | None = None) -> None:
         if base_dir is None:
-            base_dir = Path(".kairos/memory")
+            base_dir = paths.memory if paths is not None else Path(".kairos/memory")
         self.base_dir = Path(base_dir)
         self.candidates_dir = self.base_dir / "candidates"
-        self.index_file = self.base_dir / "MEMORY.md"
+        self.index_path = self.base_dir / "MEMORY.md"
 
-    def _type_dir(self, mem_type: MemoryType) -> Path:
-        """Get directory for a memory type."""
-        return self.base_dir / mem_type.value
-
-    def _ensure_dirs(self) -> None:
-        """Ensure all type directories exist."""
-        for mem_type in MemoryType:
-            self._type_dir(mem_type).mkdir(parents=True, exist_ok=True)
-        self.candidates_dir.mkdir(parents=True, exist_ok=True)
-
-    def save(self, entry: MemoryEntry) -> Path:
-        """Save a memory entry to disk.
-
-        Returns the path where the entry was saved.
-        """
+    def save(self, entry: MemoryEntry, candidate: bool | None = None) -> Path:
         self._ensure_dirs()
+        if candidate is None:
+            candidate = entry.type in AUTO_CANDIDATE_TYPES
+        target_dir = self.candidates_dir if candidate else self.base_dir / entry.type.value
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{_safe_name(entry.name)}.md"
+        path.write_text(entry.to_markdown(), encoding="utf-8")
+        if not candidate:
+            self.rebuild_index()
+        return path
 
-        # Auto types go to candidates dir
-        auto_types = (
-            MemoryType.LIFE_PATTERN,
-            MemoryType.ENERGY_PATTERN,
-            MemoryType.REFLECTION_THEME,
-        )
-        if entry.type in auto_types:
-            target_dir = self.candidates_dir
-        else:
-            target_dir = self._type_dir(entry.type)
-
-        file_path = target_dir / f"{entry.name}.md"
-
-        content = f"---\n{entry.to_frontmatter()}\n---\n\n{entry.content}"
-        file_path.write_text(content, encoding="utf-8")
-
-        return file_path
-
-    def load(self, path_or_name: str | Path) -> MemoryEntry:
-        """Load a memory entry by path or name."""
-        if "/" in str(path_or_name) or "\\" in str(path_or_name) or Path(path_or_name).exists():
-            # It's a path
-            path = Path(path_or_name)
-        else:
-            # It's a name - search in all dirs
-            path = self._find_memory_path(path_or_name)
-
-        if not path or not path.exists():
+    def load(self, path_or_name: str | Path, include_candidates: bool = True) -> MemoryEntry:
+        path = self._resolve(path_or_name, include_candidates=include_candidates)
+        if path is None or not path.exists():
             raise FileNotFoundError(f"Memory not found: {path_or_name}")
+        return MemoryEntry.from_markdown(path.read_text(encoding="utf-8"))
 
-        text = path.read_text(encoding="utf-8")
-        return MemoryEntry.from_frontmatter(text)
-
-    def _find_memory_path(self, name: str) -> Path | None:
-        """Find the path for a memory by name."""
-        # Search in candidates first, then all type dirs
-        candidates_path = self.candidates_dir / f"{name}.md"
-        if candidates_path.exists():
-            return candidates_path
-
-        for mem_type in MemoryType:
-            path = self._type_dir(mem_type) / f"{name}.md"
-            if path.exists():
-                return path
-        return None
-
-    def list(self, mem_type: MemoryType | None = None) -> list[MemoryEntry]:
-        """List all memory entries, optionally filtered by type."""
-        entries = []
-
-        if mem_type:
-            type_dirs = [self._type_dir(mem_type)]
-            if mem_type in (
-                MemoryType.LIFE_PATTERN,
-                MemoryType.ENERGY_PATTERN,
-                MemoryType.REFLECTION_THEME,
-            ):
-                type_dirs = [self.candidates_dir]
+    def list(
+        self,
+        mem_type: MemoryType | None = None,
+        include_candidates: bool = False,
+    ) -> list[MemoryEntry]:
+        dirs: list[Path]
+        if mem_type is None:
+            dirs = [self.base_dir / item.value for item in MemoryType]
+        elif mem_type in AUTO_CANDIDATE_TYPES and include_candidates:
+            dirs = [self.candidates_dir, self.base_dir / mem_type.value]
         else:
-            type_dirs = [self._type_dir(t) for t in MemoryType] + [self.candidates_dir]
+            dirs = [self.base_dir / mem_type.value]
 
-        for type_dir in type_dirs:
-            if not type_dir.exists():
+        if include_candidates and mem_type is None:
+            dirs.append(self.candidates_dir)
+
+        entries: list[MemoryEntry] = []
+        for directory in dirs:
+            if not directory.exists():
                 continue
-            for md_file in type_dir.glob("*.md"):
-                try:
-                    entry = self.load(md_file)
-                    entries.append(entry)
-                except Exception:
-                    # Skip invalid files
-                    continue
-
+            for path in sorted(directory.glob("*.md")):
+                entries.append(MemoryEntry.from_markdown(path.read_text(encoding="utf-8")))
         return entries
 
-    def delete(self, name: str) -> bool:
-        """Delete a memory entry by name.
-
-        Returns True if deleted, False if not found.
-        """
-        path = self._find_memory_path(name)
-        if path and path.exists():
-            path.unlink()
-            return True
-        return False
+    def delete(self, name: str, include_candidates: bool = True) -> bool:
+        path = self._resolve(name, include_candidates=include_candidates)
+        if path is None or not path.exists():
+            return False
+        path.unlink()
+        self.rebuild_index()
+        return True
 
     def rebuild_index(self) -> Path:
-        """Rebuild the MEMORY.md index file.
-
-        Returns the path to the index file.
-        """
         self._ensure_dirs()
+        entries = self.list(include_candidates=False)
+        lines = ["# Memory Index", ""]
+        if not entries:
+            lines.append("_No confirmed memories yet._")
+        for mem_type in MemoryType:
+            typed = [entry for entry in entries if entry.type == mem_type]
+            if not typed:
+                continue
+            lines.extend(["", f"## {mem_type.value}", ""])
+            for entry in sorted(typed, key=lambda item: item.name):
+                lines.append(f"- {entry.name}: {entry.description} [{entry.type.value}]")
+        self.index_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return self.index_path
 
-        entries = self.list()
-        lines = ["# Memory Index\n", "## All Memories\n"]
+    def _ensure_dirs(self) -> None:
+        for mem_type in MemoryType:
+            (self.base_dir / mem_type.value).mkdir(parents=True, exist_ok=True)
+        self.candidates_dir.mkdir(parents=True, exist_ok=True)
 
-        # Group by type
-        by_type: dict[str, list[MemoryEntry]] = {}
-        for entry in entries:
-            type_key = entry.type.value
-            if type_key not in by_type:
-                by_type[type_key] = []
-            by_type[type_key].append(entry)
+    def _resolve(self, path_or_name: str | Path, include_candidates: bool) -> Path | None:
+        value = Path(path_or_name)
+        if value.exists() or value.suffix == ".md" or value.parent != Path("."):
+            return value
+        safe = _safe_name(str(path_or_name))
+        for mem_type in MemoryType:
+            path = self.base_dir / mem_type.value / f"{safe}.md"
+            if path.exists():
+                return path
+        if include_candidates:
+            candidate = self.candidates_dir / f"{safe}.md"
+            if candidate.exists():
+                return candidate
+        return None
 
-        for mem_type in sorted(by_type.keys()):
-            lines.append(f"\n### {mem_type}\n")
-            for entry in sorted(by_type[mem_type], key=lambda e: e.name):
-                lines.append(f"- [[{entry.name}]]: {entry.description}")
 
-        self.index_file.write_text("\n".join(lines), encoding="utf-8")
-        return self.index_file
+def _safe_name(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
+    return cleaned.strip("_") or "memory"

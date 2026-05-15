@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -9,8 +10,14 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.messages import InboundMessage
-from kairos.core import AgentLoop
-from kairos.permissions import AutonomyLevel, PermissionManager
+from kairos.core import AgentLoop, SessionEvent, SessionStore
+from kairos.delivery import DeliveryQueue, DeliveryRunner
+from kairos.lifelog import DailyJournalStore
+from kairos.memory import MemoryEntry, MemoryStore, MemoryType
+from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
+from kairos.presence import HeartbeatPolicy, HeartbeatState, should_run
+from kairos.tools import ToolRouter
+from kairos.tools.native import build_native_registry
 
 
 def main() -> int:
@@ -25,6 +32,48 @@ def main() -> int:
 
         decision = PermissionManager(AutonomyLevel.LOW_RISK_AUTO).decide("low")
         assert decision.decision == "allow"
+
+        sessions = SessionStore(paths)
+        sessions.append("smoke", SessionEvent(role="user", content="hello"))
+        assert sessions.read("smoke")[0].content == "hello"
+
+        registry = build_native_registry(paths)
+        router = ToolRouter(
+            registry,
+            PermissionManager(AutonomyLevel.LOW_RISK_AUTO),
+            AuditLogger(paths),
+        )
+        listed = router.call("file.list", {"path": "."})
+        assert listed.status == "ok"
+        assert (paths.audit / "tool-calls.jsonl").exists()
+
+        memory_path = MemoryStore(paths).save(
+            MemoryEntry(
+                name="smoke_memory",
+                description="Smoke test memory",
+                type=MemoryType.USER,
+                content="Memory content",
+            )
+        )
+        assert memory_path.exists()
+
+        journal_path = DailyJournalStore(paths).create(date.today())
+        assert journal_path.exists()
+
+        queue = DeliveryQueue(paths)
+        delivery_id = queue.enqueue("cli", "tester", "hello")
+        stats = DeliveryRunner(queue, lambda channel, to, text: True).process_once()
+        assert stats["delivered"] == 1
+        assert not (paths.delivery_pending / f"{delivery_id}.json").exists()
+
+        allowed, reason = should_run(
+            datetime.now(timezone.utc),
+            HeartbeatPolicy(),
+            HeartbeatState(),
+            user_active=True,
+        )
+        assert allowed is False
+        assert reason == "user_active"
 
     print("smoke_check: ok")
     return 0

@@ -42,8 +42,12 @@ scripts/smoke_check.py
 - `KairosPaths` 与 `ensure_workspace`
 - `InboundMessage` 与 `OutboundMessage`
 - `AgentLoop` 占位
+- `SessionStore` 与 `SessionEvent`
 - `ToolRegistry`、`ToolSpec`、`ToolResult`
+- `ToolRouter` 与 `ToolExecutionResult`
 - `PermissionManager`、`AutonomyLevel`
+- `AuditLogger` 与 `AuditEvent`
+- `build_native_registry`
 
 其他 worker 应优先复用这些契约，不要平行创建另一套消息、路径或权限类型。
 
@@ -70,6 +74,24 @@ scripts/**
 如果 worker 必须修改上述文件，应在最终报告中明确说明原因和建议 diff，而不是直接大改。
 
 ## Worker 任务分配
+
+### Round 2
+
+Claude Code 下一轮任务：
+
+```text
+docs/parallel/ROUND2_CLAUDE_REFLECTION_MEMORY.md
+```
+
+Codex Worker 下一轮任务：
+
+```text
+docs/parallel/ROUND2_CODEX_SCHEDULER_DAEMON.md
+```
+
+两边开始前都应先同步 main，避免基于第一轮旧骨架继续写。
+
+### Round 1
 
 ### Claude Code
 
@@ -171,6 +193,8 @@ Risks / TODO:
 
 ```text
 python scripts/smoke_check.py
+python -m pytest tests/test_core_runtime.py
 PYTHONPATH=src python -m kairos.cli status
+PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli init --root <temp-dir>
 ```
