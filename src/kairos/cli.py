@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kairos.channels import CLIChannel
+from kairos.channels import ChannelManager, CLIChannel
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue, DeliveryRunner
-from kairos.lifelog import DailyJournalStore
+from kairos.lifelog import DailyJournalStore, JournalDraftBuilder, ReflectionFragment, write_reflection_draft
 from kairos.memory import MemoryEntry, MemoryStore, MemoryType
+from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
-from kairos.presence import HeartbeatPolicy, HeartbeatState, should_run
+from kairos.presence import (
+    DaemonRuntime,
+    HeartbeatPolicy,
+    HeartbeatState,
+    PresenceEvent,
+    ScheduleStore,
+    ScheduledJob,
+    should_run,
+)
+from kairos.messages import OutboundMessage
 from kairos.tools import ToolRouter
 from kairos.tools.native import build_native_registry, parse_tool_arguments
 
@@ -70,6 +80,13 @@ def build_parser() -> argparse.ArgumentParser:
     journal_append.add_argument("--date", default=None, help="YYYY-MM-DD. Defaults to today.")
     journal_append.add_argument("--root", default=".")
 
+    reflect = sub.add_parser("reflect", help="Turn a text fragment into journal sections and memory candidates.")
+    reflect.add_argument("text")
+    reflect.add_argument("--date", default=None, help="YYYY-MM-DD. Defaults to today.")
+    reflect.add_argument("--source", default="cli")
+    reflect.add_argument("--no-candidates", action="store_true")
+    reflect.add_argument("--root", default=".")
+
     delivery_enqueue = sub.add_parser("delivery-enqueue", help="Queue an outbound CLI delivery.")
     delivery_enqueue.add_argument("text")
     delivery_enqueue.add_argument("--channel", default="cli")
@@ -83,6 +100,20 @@ def build_parser() -> argparse.ArgumentParser:
     heartbeat_check.add_argument("--user-active", action="store_true")
     heartbeat_check.add_argument("--dnd", action="store_true")
     heartbeat_check.add_argument("--root", default=".")
+
+    schedule_add = sub.add_parser("schedule-add", help="Add a lightweight presence schedule.")
+    schedule_add.add_argument("id")
+    schedule_add.add_argument("name")
+    schedule_add.add_argument("--kind", choices=["at", "every"], default="every")
+    schedule_add.add_argument("--at", default=None, help="ISO datetime for kind=at.")
+    schedule_add.add_argument("--seconds", type=int, default=3600, help="Interval seconds for kind=every.")
+    schedule_add.add_argument("--event", default="daily_journal_check")
+    schedule_add.add_argument("--message", default=None)
+    schedule_add.add_argument("--due-now", action="store_true")
+    schedule_add.add_argument("--root", default=".")
+
+    daemon_tick = sub.add_parser("daemon-tick", help="Run one daemon scheduler/delivery tick.")
+    daemon_tick.add_argument("--root", default=".")
 
     chat_once = sub.add_parser("chat-once", help="Run one deterministic AgentLoop turn.")
     chat_once.add_argument("text")
@@ -193,6 +224,29 @@ def cmd_journal_append(root: str, raw_date: str | None, heading: str, text: str)
     return 0
 
 
+def cmd_reflect(
+    root: str,
+    raw_date: str | None,
+    text: str,
+    source: str,
+    no_candidates: bool,
+) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    journal_date = _parse_date(raw_date)
+    fragment = ReflectionFragment(text=text, source=source)
+    draft = JournalDraftBuilder.from_fragments(journal_date, [fragment])
+    journal_path = write_reflection_draft(DailyJournalStore(paths), draft)
+    print(f"journal: {journal_path}")
+
+    candidates = MemoryCandidateExtractor.extract_from_draft(draft)
+    saved = [] if no_candidates else save_candidates(MemoryStore(paths), candidates)
+    print(f"candidates: {len(candidates)}")
+    for path in saved:
+        print(f"candidate: {path}")
+    return 0
+
+
 def cmd_delivery_enqueue(root: str, channel: str, to: str, text: str) -> int:
     paths = KairosPaths.from_root(Path(root))
     ensure_workspace(paths)
@@ -230,6 +284,67 @@ def cmd_heartbeat_check(root: str, user_active: bool, dnd: bool) -> int:
     )
     print(f"allowed: {allowed}")
     print(f"reason: {reason}")
+    return 0
+
+
+def cmd_schedule_add(
+    root: str,
+    job_id: str,
+    name: str,
+    kind: str,
+    raw_at: str | None,
+    seconds: int,
+    event: str,
+    message: str | None,
+    due_now: bool,
+) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    now = datetime.now(timezone.utc)
+    schedule: dict[str, object]
+    if kind == "at":
+        if raw_at is None and not due_now:
+            raise ValueError("--at is required for kind=at unless --due-now is used.")
+        schedule = {"kind": "at", "at": (now if due_now else _parse_datetime(raw_at)).isoformat()}
+    else:
+        schedule = {"kind": "every", "seconds": seconds}
+
+    payload = {
+        "kind": "presence_event",
+        "event": event,
+        "payload": {
+            "message": message,
+            "channel": "cli",
+            "to": "local-user",
+        },
+    }
+    job = ScheduledJob(
+        id=job_id,
+        name=name,
+        schedule=schedule,
+        payload=payload,
+        next_run_at=now if due_now else None,
+    )
+    ScheduleStore(paths).add(job)
+    print(f"schedule: {job_id}")
+    return 0
+
+
+def cmd_daemon_tick(root: str) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    runtime = DaemonRuntime(
+        schedule_store=ScheduleStore(paths),
+        delivery_queue=DeliveryQueue(paths),
+        channel_manager=ChannelManager([CLIChannel()]),
+        presence_handler=_presence_handler,
+    )
+    result = runtime.tick()
+    print(f"due_jobs: {result.due_jobs}")
+    print(f"enqueued: {result.enqueued}")
+    print(f"failed_jobs: {result.failed_jobs}")
+    for key, value in result.delivery.items():
+        print(f"delivery_{key}: {value}")
     return 0
 
 
@@ -275,12 +390,28 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_journal_create(args.root, args.date)
     if args.command == "journal-append":
         return cmd_journal_append(args.root, args.date, args.heading, args.text)
+    if args.command == "reflect":
+        return cmd_reflect(args.root, args.date, args.text, args.source, args.no_candidates)
     if args.command == "delivery-enqueue":
         return cmd_delivery_enqueue(args.root, args.channel, args.to, args.text)
     if args.command == "delivery-process":
         return cmd_delivery_process(args.root)
     if args.command == "heartbeat-check":
         return cmd_heartbeat_check(args.root, args.user_active, args.dnd)
+    if args.command == "schedule-add":
+        return cmd_schedule_add(
+            args.root,
+            args.id,
+            args.name,
+            args.kind,
+            args.at,
+            args.seconds,
+            args.event,
+            args.message,
+            args.due_now,
+        )
+    if args.command == "daemon-tick":
+        return cmd_daemon_tick(args.root)
     if args.command == "chat-once":
         return cmd_chat_once(args.root, args.session, args.text, args.autonomy)
     if args.command in {"chat", "daemon"}:
@@ -305,6 +436,32 @@ def _parse_date(raw: str | None) -> date:
     if raw is None:
         return date.today()
     return date.fromisoformat(raw)
+
+
+def _parse_datetime(raw: str | None) -> datetime:
+    if raw is None:
+        raise ValueError("datetime value is required")
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _presence_handler(event: PresenceEvent, now: datetime):
+    message = event.payload.get("message") or _default_presence_message(event)
+    if not message:
+        return []
+    channel = str(event.payload.get("channel", "cli"))
+    to = str(event.payload.get("to", "local-user"))
+    return [OutboundMessage(channel=channel, to=to, text=str(message))]
+
+
+def _default_presence_message(event: PresenceEvent) -> str:
+    if event.event == "daily_journal_check":
+        return "今天还没有留下记录。要不要随便丢几个碎片给我，我帮你整理成日记？"
+    if event.event == "heartbeat":
+        return "Kairos heartbeat check."
+    return f"Kairos presence event: {event.event}"
 
 
 if __name__ == "__main__":

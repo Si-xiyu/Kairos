@@ -76,7 +76,7 @@ class ScheduledJob:
             last_run_at=_datetime_from_json(data.get("last_run_at")),
             next_run_at=_datetime_from_json(data.get("next_run_at")),
             failure_count=int(data.get("failure_count", 0)),
-            max_failures=int(data.get("max_failures", 3)),
+            max_failures=int(data.get("max_failures", 5)),
             last_error=data.get("last_error"),
             disabled_reason=data.get("disabled_reason"),
         )

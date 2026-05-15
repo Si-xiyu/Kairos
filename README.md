@@ -36,6 +36,9 @@ python scripts/smoke_check.py
 PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
 PYTHONPATH=src python -m kairos.cli chat-once "/tool file.list path=."
+PYTHONPATH=src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量"
+PYTHONPATH=src python -m kairos.cli schedule-add journal "Journal Check" --due-now --message "要写日记吗？"
+PYTHONPATH=src python -m kairos.cli daemon-tick
 ```
 
 For direct module execution before installing the package, set `PYTHONPATH=src`.

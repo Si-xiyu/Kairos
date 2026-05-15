@@ -12,8 +12,9 @@ from kairos.config import KairosPaths, ensure_workspace
 from kairos.messages import InboundMessage
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue, DeliveryRunner
-from kairos.lifelog import DailyJournalStore
+from kairos.lifelog import DailyJournalStore, JournalDraftBuilder, ReflectionFragment, write_reflection_draft
 from kairos.memory import MemoryEntry, MemoryStore, MemoryType
+from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
 from kairos.presence import HeartbeatPolicy, HeartbeatState, should_run
 from kairos.tools import ToolRouter
@@ -79,6 +80,17 @@ def main() -> int:
             InboundMessage(text="/tool file.list path=.", sender_id="tester")
         )
         assert "tool file.list: ok" in turn.outbound[0].text
+
+        draft = JournalDraftBuilder.from_fragments(
+            date.today(),
+            [ReflectionFragment(text="我喜欢先讨论架构，今天很有能量", source="smoke")],
+        )
+        write_reflection_draft(DailyJournalStore(paths), draft)
+        candidate_paths = save_candidates(
+            MemoryStore(paths),
+            MemoryCandidateExtractor.extract_from_draft(draft),
+        )
+        assert candidate_paths
 
     print("smoke_check: ok")
     return 0
