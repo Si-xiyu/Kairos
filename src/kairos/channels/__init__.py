@@ -2,5 +2,6 @@
 
 from .base import Channel
 from .cli import CLIChannel, WindowsToastChannel
+from .manager import ChannelManager
 
-__all__ = ["Channel", "CLIChannel", "WindowsToastChannel"]
+__all__ = ["Channel", "ChannelManager", "CLIChannel", "WindowsToastChannel"]
