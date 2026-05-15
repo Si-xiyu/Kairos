@@ -103,8 +103,9 @@ class DeliveryQueue:
         to: str,
         text: str,
         expires_at: datetime | None = None,
+        now: datetime | None = None,
     ) -> str:
-        now = utc_now()
+        now = _coerce_datetime(now) or utc_now()
         delivery = QueuedDelivery(
             id=uuid4().hex,
             channel=channel,
@@ -190,4 +191,3 @@ class DeliveryQueue:
             except OSError:
                 pass
         os.replace(tmp, target)
-

@@ -6,10 +6,11 @@ from pathlib import Path
 
 from kairos.channels import CLIChannel
 from kairos.config import KairosPaths, ensure_workspace
-from kairos.core import SessionEvent, SessionStore
+from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue, DeliveryRunner
 from kairos.lifelog import DailyJournalStore
 from kairos.memory import MemoryEntry, MemoryStore, MemoryType
+from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
 from kairos.presence import HeartbeatPolicy, HeartbeatState, should_run
 from kairos.tools import ToolRouter
@@ -82,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     heartbeat_check.add_argument("--user-active", action="store_true")
     heartbeat_check.add_argument("--dnd", action="store_true")
     heartbeat_check.add_argument("--root", default=".")
+
+    chat_once = sub.add_parser("chat-once", help="Run one deterministic AgentLoop turn.")
+    chat_once.add_argument("text")
+    chat_once.add_argument("--session", default="default")
+    chat_once.add_argument("--root", default=".")
+    chat_once.add_argument("--autonomy", type=int, default=3)
 
     sub.add_parser("chat", help="Placeholder for interactive agent chat.")
     sub.add_parser("daemon", help="Placeholder for long-running Kairos daemon.")
@@ -226,6 +233,19 @@ def cmd_heartbeat_check(root: str, user_active: bool, dnd: bool) -> int:
     return 0
 
 
+def cmd_chat_once(root: str, session: str, text: str, autonomy: int) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    context = RuntimeContext.local(paths, session_id=session, autonomy_level=AutonomyLevel(autonomy))
+    result = AgentLoop(context).run_turn(
+        InboundMessage(text=text, sender_id="cli-user", channel="cli", peer_id="cli-user")
+    )
+    channel = CLIChannel()
+    for outbound in result.outbound:
+        channel.send(outbound.to, outbound.text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -261,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_delivery_process(args.root)
     if args.command == "heartbeat-check":
         return cmd_heartbeat_check(args.root, args.user_active, args.dnd)
+    if args.command == "chat-once":
+        return cmd_chat_once(args.root, args.session, args.text, args.autonomy)
     if args.command in {"chat", "daemon"}:
         print(f"`kairos {args.command}` is reserved by the runtime skeleton.")
         return 0

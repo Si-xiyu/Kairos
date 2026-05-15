@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from kairos.config import KairosPaths, ensure_workspace
-from kairos.core import SessionEvent, SessionStore
+from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore, parse_agent_command
+from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
 from kairos.tools import ToolRouter
 from kairos.tools.native import build_native_registry, parse_tool_arguments
@@ -64,3 +65,42 @@ def test_file_tool_rejects_path_escape(tmp_path: Path) -> None:
 
 def test_parse_tool_arguments_accepts_escaped_json() -> None:
     assert parse_tool_arguments('{\\"path\\":\\".\\"}') == {"path": "."}
+
+
+def test_parse_agent_command_tool() -> None:
+    command = parse_agent_command("/tool file.read path=README.md")
+
+    assert command.kind == "tool"
+    assert command.name == "file.read"
+    assert command.arguments == {"path": "README.md"}
+
+
+def test_agent_loop_records_plain_turn(tmp_path: Path) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    context = RuntimeContext.local(paths, session_id="plain")
+
+    result = AgentLoop(context).run_turn(InboundMessage(text="hello", sender_id="tester"))
+    events = SessionStore(paths).read("plain")
+
+    assert result.outbound
+    assert "LLM integration is not wired yet" in result.outbound[0].text
+    assert [event.role for event in events] == ["user", "assistant"]
+
+
+def test_agent_loop_tool_turn_uses_router_and_audit(tmp_path: Path) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    context = RuntimeContext.local(paths, session_id="tool")
+
+    result = AgentLoop(context).run_turn(
+        InboundMessage(text="/tool file.read path=note.txt", sender_id="tester")
+    )
+    events = SessionStore(paths).read("tool")
+
+    assert result.outbound
+    assert "tool file.read: ok" in result.outbound[0].text
+    assert "hello" in result.outbound[0].text
+    assert [event.role for event in events] == ["user", "tool", "assistant"]
+    assert (paths.audit / "tool-calls.jsonl").exists()

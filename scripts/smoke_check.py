@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.messages import InboundMessage
-from kairos.core import AgentLoop, SessionEvent, SessionStore
+from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue, DeliveryRunner
 from kairos.lifelog import DailyJournalStore
 from kairos.memory import MemoryEntry, MemoryStore, MemoryType
@@ -74,6 +74,11 @@ def main() -> int:
         )
         assert allowed is False
         assert reason == "user_active"
+
+        turn = AgentLoop(RuntimeContext.local(paths, session_id="agent-smoke")).run_turn(
+            InboundMessage(text="/tool file.list path=.", sender_id="tester")
+        )
+        assert "tool file.list: ok" in turn.outbound[0].text
 
     print("smoke_check: ok")
     return 0

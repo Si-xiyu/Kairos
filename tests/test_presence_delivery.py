@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from kairos.channels import ChannelManager, CLIChannel
 from kairos.config import KairosPaths
 from kairos.delivery import DeliveryQueue, DeliveryRunner, MAX_RETRIES
-from kairos.presence import HeartbeatPolicy, HeartbeatState, should_run
+from kairos.messages import OutboundMessage
+from kairos.presence import (
+    DaemonRuntime,
+    HeartbeatPolicy,
+    HeartbeatState,
+    ScheduleStore,
+    ScheduledJob,
+    should_run,
+)
 
 
 def test_enqueue_generates_pending_file(tmp_path):
@@ -129,3 +138,126 @@ def test_should_run_blocks_user_active_and_running():
         HeartbeatState(running=True),
         user_active=False,
     ) == (False, "running")
+
+
+def test_channel_manager_routes_registered_channels(capsys):
+    manager = ChannelManager([CLIChannel()])
+
+    assert manager.names == ("cli",)
+    assert manager.send("cli", "local-user", "hello") is True
+    assert manager.send("missing", "local-user", "hello") is False
+    assert "[kairos:cli:local-user] hello" in capsys.readouterr().out
+
+
+def test_schedule_store_finds_due_interval_job_and_marks_success(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    store = ScheduleStore(paths)
+    now = datetime(2026, 5, 15, 12, tzinfo=timezone.utc)
+    job = ScheduledJob(
+        id="heartbeat",
+        name="Heartbeat",
+        schedule={"kind": "interval", "seconds": 60},
+        payload={"kind": "presence_event", "event": "heartbeat"},
+        last_run_at=now - timedelta(minutes=2),
+    )
+    store.save([job])
+
+    due = store.due(now=now)
+    assert [item.id for item in due] == ["heartbeat"]
+
+    store.mark_success("heartbeat", now=now)
+    updated = store.load()[0]
+    assert updated.failure_count == 0
+    assert updated.last_run_at == now
+    assert updated.next_run_at == now + timedelta(seconds=60)
+
+
+def test_schedule_store_disables_job_after_max_failures(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    store = ScheduleStore(paths)
+    now = datetime(2026, 5, 15, 12, tzinfo=timezone.utc)
+    store.save(
+        [
+            ScheduledJob(
+                id="nightly",
+                name="Nightly",
+                schedule={"kind": "daily", "hour": 23, "minute": 0},
+                payload={"kind": "presence_event", "event": "daily_journal_check"},
+                max_failures=2,
+            )
+        ]
+    )
+
+    store.mark_failure("nightly", "first", now=now)
+    store.mark_failure("nightly", "second", now=now)
+
+    updated = store.load()[0]
+    assert updated.enabled is False
+    assert updated.failure_count == 2
+    assert updated.disabled_reason == "max_failures_exceeded"
+
+
+def test_scheduled_job_computes_common_cron_due_time():
+    after = datetime(2026, 5, 15, 22, 59, tzinfo=timezone.utc)
+    job = ScheduledJob(
+        id="nightly",
+        name="Nightly",
+        schedule={"kind": "cron", "expr": "0 23 * * *"},
+        payload={"kind": "presence_event", "event": "daily_journal_check"},
+    )
+
+    assert job.next_due_after(after) == datetime(
+        2026,
+        5,
+        15,
+        23,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+
+def test_daemon_tick_runs_due_job_and_processes_delivery(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    store = ScheduleStore(paths)
+    queue = DeliveryQueue(paths)
+    now = datetime(2026, 5, 15, 12, tzinfo=timezone.utc)
+    sent: list[tuple[str, str, str]] = []
+
+    store.save(
+        [
+            ScheduledJob(
+                id="journal",
+                name="Journal",
+                schedule={"kind": "interval", "seconds": 60},
+                payload={"kind": "presence_event", "event": "daily_journal_check"},
+                last_run_at=now - timedelta(minutes=2),
+            )
+        ]
+    )
+
+    def handler(event, current_time):
+        assert event.event == "daily_journal_check"
+        assert current_time == now
+        return [OutboundMessage(channel="capture", to="local-user", text="journal?")]
+
+    class CaptureChannel(CLIChannel):
+        name = "capture"
+
+        def send(self, to: str, text: str, **kwargs: object) -> bool:
+            sent.append((self.name, to, text))
+            return True
+
+    runtime = DaemonRuntime(
+        schedule_store=store,
+        delivery_queue=queue,
+        channel_manager=ChannelManager([CaptureChannel()]),
+        presence_handler=handler,
+    )
+
+    result = runtime.tick(now=now)
+
+    assert result.due_jobs == 1
+    assert result.enqueued == 1
+    assert result.delivery["delivered"] == 1
+    assert sent == [("capture", "local-user", "journal?")]
+    assert queue.load_pending() == []
