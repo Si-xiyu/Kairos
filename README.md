@@ -35,6 +35,7 @@ src/kairos/
 python scripts/smoke_check.py
 PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
+PYTHONPATH=src python -m kairos.cli chat-once "/tool file.list path=."
 ```
 
 For direct module execution before installing the package, set `PYTHONPATH=src`.
@@ -48,3 +49,4 @@ The current commander-owned runtime contracts include:
 - permission-gated tool execution via `ToolRouter`,
 - JSONL audit logs via `AuditLogger`,
 - project-root constrained file tools.
+- deterministic `AgentLoop` turns via `chat-once`.
