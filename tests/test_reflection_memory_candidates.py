@@ -1,11 +1,6 @@
 """Tests for reflection and memory candidates."""
 
-import os
-import tempfile
 from datetime import date
-from pathlib import Path
-
-import pytest
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.lifelog import (
@@ -71,11 +66,9 @@ def test_write_reflection_draft_to_journal(tmp_path):
         thoughts=["一切正常"],
     )
 
-    written_paths = write_reflection_draft(store, draft)
+    written_path = write_reflection_draft(store, draft)
 
-    assert len(written_paths) > 0
-    for p in written_paths:
-        assert p.exists()
+    assert written_path.exists()
 
     content = store.read(today)
     assert "测试完成" in content
@@ -92,9 +85,12 @@ def test_memory_candidate_extractor_from_draft():
 
     candidates = MemoryCandidateExtractor.extract_from_draft(draft)
 
+    preference_candidates = [c for c in candidates if c.entry.type == MemoryType.USER]
     # Should detect energy pattern
     energy_candidates = [c for c in candidates if c.entry.type == MemoryType.ENERGY_PATTERN]
+    assert len(preference_candidates) > 0
     assert len(energy_candidates) > 0
+    assert preference_candidates[0].entry.source == "journal/2026-05-15"
 
 
 def test_save_candidates_to_store(tmp_path):
@@ -125,9 +121,10 @@ def test_candidates_not_in_default_list(tmp_path):
     store = MemoryStore(paths)
 
     today = date(2026, 5, 15)
-    draft = DailyReflectionDraft(journal_date=today, energy=["测试"])
+    draft = DailyReflectionDraft(journal_date=today, energy=["反复消耗在切换上下文上"])
 
     candidates = MemoryCandidateExtractor.extract_from_draft(draft)
+    assert candidates
     save_candidates(store, candidates)
 
     # Default list should not include candidates

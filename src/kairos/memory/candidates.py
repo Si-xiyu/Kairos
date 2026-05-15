@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from kairos.memory.model import MemoryEntry, MemoryType
 from kairos.memory.store import MemoryStore
+
+if TYPE_CHECKING:
+    from kairos.lifelog.reflection import DailyReflectionDraft
 
 
 @dataclass
@@ -20,43 +23,36 @@ class MemoryCandidateExtractor:
     """Extracts memory candidates from reflection drafts using simple heuristics."""
 
     # Keywords for candidate extraction
-    USER_PREFERENCE_KEYWORDS = {"喜欢", "偏好", "希望", "想要", "倾向于", "更愿意"}
+    USER_PREFERENCE_KEYWORDS = {"喜欢", "偏好", "希望", "想要", "倾向于", "更愿意", "以后"}
     FEEDBACK_KEYWORDS = {"不喜欢", "不要", "别", "避免", "不想", "厌恶"}
-    ENERGY_POSITIVE_KEYWORDS = {"有能量", "精力充沛", "开心", "兴奋", "满足", "成就"}
+    ENERGY_POSITIVE_KEYWORDS = {"有能量", "有精力", "精力充沛", "开心", "兴奋", "满足", "成就"}
     ENERGY_NEGATIVE_KEYWORDS = {"消耗", "疲惫", "累", "无力", "疲倦", "困"}
     PATTERN_KEYWORDS = {"反复", "总是", "通常", "经常", "每次", "又"}
 
     @classmethod
-    def extract_from_draft(cls, draft) -> list[MemoryCandidate]:
+    def extract_from_draft(cls, draft: DailyReflectionDraft) -> list[MemoryCandidate]:
         """Extract memory candidates from a reflection draft."""
         candidates: list[MemoryCandidate] = []
-
-        # Collect all text sections
-        all_text = "\n".join(
-            draft.happened
-            + draft.thoughts
-            + draft.actions
-            + draft.energy
-            + draft.valuable_conversations
-            + draft.kairos_observations
-            + draft.tomorrow
-        )
+        lines = cls._draft_lines(draft)
+        all_text = "\n".join(lines)
 
         # Check for user preferences
-        for keyword in cls.USER_PREFERENCE_KEYWORDS:
-            if keyword in all_text:
-                candidate = cls._create_preference_candidate(all_text, keyword, is_positive=True)
-                if candidate:
-                    candidates.append(candidate)
-                break
+        positive_lines = [
+            line
+            for line in cls._matching_lines(lines, cls.USER_PREFERENCE_KEYWORDS)
+            if not any(keyword in line for keyword in cls.FEEDBACK_KEYWORDS)
+        ]
+        if positive_lines:
+            candidates.append(
+                cls._create_preference_candidate(draft, positive_lines, is_positive=True)
+            )
 
         # Check for negative feedback
-        for keyword in cls.FEEDBACK_KEYWORDS:
-            if keyword in all_text:
-                candidate = cls._create_preference_candidate(all_text, keyword, is_positive=False)
-                if candidate:
-                    candidates.append(candidate)
-                break
+        feedback_lines = cls._matching_lines(lines, cls.FEEDBACK_KEYWORDS)
+        if feedback_lines:
+            candidates.append(
+                cls._create_preference_candidate(draft, feedback_lines, is_positive=False)
+            )
 
         # Check for energy patterns
         if any(kw in all_text for kw in cls.ENERGY_POSITIVE_KEYWORDS):
@@ -104,30 +100,44 @@ class MemoryCandidateExtractor:
         return candidates
 
     @classmethod
+    def _draft_lines(cls, draft: DailyReflectionDraft) -> list[str]:
+        return [
+            line.strip()
+            for line in (
+                draft.happened
+                + draft.thoughts
+                + draft.actions
+                + draft.energy
+                + draft.valuable_conversations
+                + draft.kairos_observations
+                + draft.tomorrow
+            )
+            if line.strip()
+        ]
+
+    @classmethod
+    def _matching_lines(cls, lines: list[str], keywords: set[str]) -> list[str]:
+        return [line for line in lines if any(keyword in line for keyword in keywords)]
+
+    @classmethod
     def _create_preference_candidate(
-        cls, text: str, keyword: str, is_positive: bool
-    ) -> MemoryCandidate | None:
+        cls, draft: DailyReflectionDraft, lines: list[str], is_positive: bool
+    ) -> MemoryCandidate:
         """Create a preference memory candidate."""
-        lines = text.split("\n")
-        relevant_lines = [
-            line.strip() for line in lines if keyword in line
-        ][:3]  # Limit to 3 relevant lines
-
-        if not relevant_lines:
-            return None
-
-        content = "\n".join(relevant_lines)
+        content = "\n".join(lines[:3])
         mem_type = MemoryType.USER if is_positive else MemoryType.FEEDBACK
+        journal_date = draft.journal_date.isoformat()
+        kind = "prefer" if is_positive else "avoid"
 
         return MemoryCandidate(
             entry=MemoryEntry(
-                name=f"{'prefer' if is_positive else 'avoid'}_{keyword}_{date.today().isoformat()}",
-                description=f"User {'preference' if is_positive else 'preference'} detected: {keyword}",
+                name=f"{kind}_{journal_date}",
+                description=f"User {'preference' if is_positive else 'feedback'} candidate from reflection draft.",
                 type=mem_type,
                 content=content,
-                source=f"journal/{date.today().isoformat()}",
+                source=f"journal/{journal_date}",
             ),
-            reason=f"{'Positive' if is_positive else 'Negative'} preference keyword: {keyword}",
+            reason=f"{'Positive preference' if is_positive else 'Negative feedback'} keywords detected",
         )
 
 

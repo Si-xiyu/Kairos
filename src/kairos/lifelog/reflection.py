@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kairos.lifelog.journal import DailyJournalStore
 
 
 @dataclass
@@ -92,12 +95,12 @@ class JournalDraftBuilder:
         return draft
 
 
-def write_reflection_draft(store: DailyJournalStore, draft: DailyReflectionDraft) -> list[Path]:
+def write_reflection_draft(store: DailyJournalStore, draft: DailyReflectionDraft) -> Path:
     """Write a reflection draft to the journal store.
 
-    Returns list of paths where fragments were written.
+    Returns the journal path that received the draft.
     """
-    paths: list[Path] = []
+    path = store.create(draft.journal_date)
     sections = draft.to_markdown_sections()
 
     # Map our sections to journal sections
@@ -115,6 +118,5 @@ def write_reflection_draft(store: DailyJournalStore, draft: DailyReflectionDraft
         if section_text:
             journal_section = section_map.get(section_key, section_key)
             path = store.append_fragment(draft.journal_date, journal_section, section_text)
-            paths.append(path)
 
-    return paths
+    return path
