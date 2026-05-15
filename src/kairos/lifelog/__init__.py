@@ -1,4 +1,4 @@
-"""Markdown journal and periodic review subsystem.
+from kairos.lifelog.journal import DailyJournalStore
+from kairos.lifelog.weekly import WeeklyReviewStore
 
-Assigned implementation owner: Claude Code task brief.
-"""
+__all__ = ["DailyJournalStore", "WeeklyReviewStore"]

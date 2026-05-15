@@ -1,4 +1,4 @@
-"""Personal memory subsystem.
+from kairos.memory.model import MemoryEntry, MemoryScope, MemoryType
+from kairos.memory.store import MemoryStore
 
-Assigned implementation owner: Claude Code task brief.
-"""
+__all__ = ["MemoryEntry", "MemoryScope", "MemoryStore", "MemoryType"]
