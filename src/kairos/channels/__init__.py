@@ -1,4 +1,6 @@
-"""Input and output channel gateway.
+"""Input and output channel gateway."""
 
-Assigned implementation owner: Codex task brief.
-"""
+from .base import Channel
+from .cli import CLIChannel, WindowsToastChannel
+
+__all__ = ["Channel", "CLIChannel", "WindowsToastChannel"]
