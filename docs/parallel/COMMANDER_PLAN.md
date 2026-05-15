@@ -75,6 +75,24 @@ scripts/**
 
 ## Worker 任务分配
 
+### Round 2
+
+Claude Code 下一轮任务：
+
+```text
+docs/parallel/ROUND2_CLAUDE_REFLECTION_MEMORY.md
+```
+
+Codex Worker 下一轮任务：
+
+```text
+docs/parallel/ROUND2_CODEX_SCHEDULER_DAEMON.md
+```
+
+两边开始前都应先同步 main，避免基于第一轮旧骨架继续写。
+
+### Round 1
+
 ### Claude Code
 
 任务文件：
