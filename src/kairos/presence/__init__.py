@@ -3,7 +3,15 @@
 from .events import PresenceEvent
 from .heartbeat import HeartbeatPolicy, HeartbeatState, should_run
 from .daemon import DaemonRuntime, DaemonTickResult
-from .schedule import ScheduleStore, ScheduledJob
+from .schedule import (
+    ScheduleKind,
+    ScheduleStore,
+    ScheduledJob,
+    compute_next_run,
+    due_jobs,
+    mark_failure,
+    mark_success,
+)
 
 __all__ = [
     "DaemonRuntime",
@@ -11,7 +19,12 @@ __all__ = [
     "HeartbeatPolicy",
     "HeartbeatState",
     "PresenceEvent",
+    "ScheduleKind",
     "ScheduleStore",
     "ScheduledJob",
+    "compute_next_run",
+    "due_jobs",
+    "mark_failure",
+    "mark_success",
     "should_run",
 ]

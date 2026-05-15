@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,15 @@ from kairos.config import KairosPaths
 
 
 SCHEDULE_FILE = "cron.json"
+
+
+class ScheduleKind(str, Enum):
+    AT = "at"
+    EVERY = "every"
+    ONCE = "once"
+    INTERVAL = "interval"
+    DAILY = "daily"
+    CRON = "cron"
 
 
 def _coerce_datetime(value: datetime | None) -> datetime | None:
@@ -45,7 +55,7 @@ class ScheduledJob:
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None
     failure_count: int = 0
-    max_failures: int = 3
+    max_failures: int = 5
     last_error: str | None = None
     disabled_reason: str | None = None
 
@@ -78,45 +88,54 @@ class ScheduledJob:
         due_at = self.next_run_at
         if due_at is None and self.last_run_at is not None:
             due_at = self.next_due_after(self.last_run_at)
-        if due_at is None and str(self.schedule.get("kind", "")).lower() == "once":
+        if due_at is None and _schedule_kind(self.schedule) in {
+            ScheduleKind.AT,
+            ScheduleKind.ONCE,
+        }:
             due_at = self.next_due_after(now)
         return due_at is not None and due_at <= _coerce_datetime(now)
 
     def next_due_after(self, after: datetime | None) -> datetime | None:
         schedule = self.schedule
-        kind = str(schedule.get("kind", "")).lower()
+        kind = _schedule_kind(schedule)
         after = _coerce_datetime(after) or datetime.now(timezone.utc)
 
-        if kind == "once":
+        if kind in {ScheduleKind.AT, ScheduleKind.ONCE}:
             return _datetime_from_json(schedule.get("at"))
-        if kind == "interval":
-            seconds = int(schedule["seconds"])
+        if kind in {ScheduleKind.EVERY, ScheduleKind.INTERVAL}:
+            seconds = int(schedule.get("seconds", schedule.get("every_seconds", 0)))
             return after + timedelta(seconds=seconds)
-        if kind == "daily":
+        if kind == ScheduleKind.DAILY:
             hour = int(schedule["hour"])
             minute = int(schedule.get("minute", 0))
             candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if candidate <= after:
                 candidate += timedelta(days=1)
             return candidate
-        if kind == "cron":
+        if kind == ScheduleKind.CRON:
             return _next_cron_after(str(schedule["expr"]), after)
         return None
 
     def with_success(self, now: datetime) -> "ScheduledJob":
         now = _coerce_datetime(now) or datetime.now(timezone.utc)
+        kind = _schedule_kind(self.schedule)
+        next_run_at = self.next_due_after(now)
+        enabled = self.enabled
+        if kind in {ScheduleKind.AT, ScheduleKind.ONCE}:
+            enabled = False
+            next_run_at = None
         return ScheduledJob(
             id=self.id,
             name=self.name,
             schedule=self.schedule,
             payload=self.payload,
-            enabled=self.enabled,
+            enabled=enabled,
             last_run_at=now,
-            next_run_at=self.next_due_after(now),
+            next_run_at=next_run_at,
             failure_count=0,
             max_failures=self.max_failures,
             last_error=None,
-            disabled_reason=None,
+            disabled_reason="completed" if not enabled else None,
         )
 
     def with_failure(self, error: str, now: datetime) -> "ScheduledJob":
@@ -186,6 +205,12 @@ class ScheduleStore:
             updated.append(job)
         self.save(updated)
 
+    def add(self, job: ScheduledJob) -> None:
+        self.upsert(job)
+
+    def update(self, job: ScheduledJob) -> None:
+        self.upsert(job)
+
     def mark_success(self, job_id: str, now: datetime | None = None) -> None:
         now = _coerce_datetime(now) or datetime.now(timezone.utc)
         self._update_job(job_id, lambda job: job.with_success(now))
@@ -239,3 +264,48 @@ def _parse_cron_field(raw: str) -> set[int] | None:
 
 def _matches(value: int, allowed: set[int] | None) -> bool:
     return allowed is None or value in allowed
+
+
+def compute_next_run(job: ScheduledJob, now: datetime | None = None) -> datetime | None:
+    return job.next_due_after(_coerce_datetime(now) or datetime.now(timezone.utc))
+
+
+def due_jobs(jobs: list[ScheduledJob], now: datetime) -> list[ScheduledJob]:
+    now = _coerce_datetime(now) or datetime.now(timezone.utc)
+    return [job for job in jobs if job.is_due(now)]
+
+
+def mark_success(job: ScheduledJob, now: datetime) -> ScheduledJob:
+    return job.with_success(now)
+
+
+def mark_failure(
+    job: ScheduledJob,
+    now: datetime,
+    error: str = "error",
+    max_errors: int = 5,
+) -> ScheduledJob:
+    if job.max_failures == max_errors:
+        return job.with_failure(error, now)
+    normalized = ScheduledJob(
+        id=job.id,
+        name=job.name,
+        schedule=job.schedule,
+        payload=job.payload,
+        enabled=job.enabled,
+        last_run_at=job.last_run_at,
+        next_run_at=job.next_run_at,
+        failure_count=job.failure_count,
+        max_failures=max_errors,
+        last_error=job.last_error,
+        disabled_reason=job.disabled_reason,
+    )
+    return normalized.with_failure(error, now)
+
+
+def _schedule_kind(schedule: dict[str, Any]) -> ScheduleKind | str:
+    raw = str(schedule.get("kind", "")).lower()
+    try:
+        return ScheduleKind(raw)
+    except ValueError:
+        return raw
