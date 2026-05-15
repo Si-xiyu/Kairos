@@ -92,6 +92,11 @@ def main() -> int:
         )
         assert candidate_paths
 
+        from kairos.cli import main as cli_main
+
+        assert cli_main(["bootstrap", "--root", str(paths.root)]) == 0
+        assert cli_main(["doctor", "--root", str(paths.root)]) == 0
+
     print("smoke_check: ok")
     return 0
 

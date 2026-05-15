@@ -55,3 +55,21 @@ def test_schedule_add_and_daemon_tick_cli_deliver_message(tmp_path: Path, capsys
     assert "要写日记吗？" in output
     assert "due_jobs: 1" in output
     assert "delivery_delivered: 1" in output
+
+
+def test_bootstrap_installs_default_schedule_and_doctor_reports_counts(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bootstrap_result = main(["bootstrap", "--root", str(tmp_path)])
+    doctor_result = main(["doctor", "--root", str(tmp_path)])
+    output = capsys.readouterr().out
+
+    paths = KairosPaths.from_root(tmp_path)
+    schedule_file = paths.schedules / "cron.json"
+
+    assert bootstrap_result == 0
+    assert doctor_result == 0
+    assert schedule_file.exists()
+    assert "default_nightly_journal: installed" in output
+    assert "schedules: 1" in output

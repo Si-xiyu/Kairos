@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from kairos.channels import ChannelManager, CLIChannel
@@ -33,6 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = sub.add_parser("init", help="Create the local .kairos workspace.")
     init_parser.add_argument("--root", default=".", help="Project root. Defaults to current directory.")
+
+    bootstrap_parser = sub.add_parser("bootstrap", help="Initialize Kairos and install first-round defaults.")
+    bootstrap_parser.add_argument("--root", default=".", help="Project root. Defaults to current directory.")
+    bootstrap_parser.add_argument("--force", action="store_true", help="Overwrite default jobs if they exist.")
+
+    doctor_parser = sub.add_parser("doctor", help="Inspect the local Kairos workspace.")
+    doctor_parser.add_argument("--root", default=".", help="Project root. Defaults to current directory.")
 
     status_parser = sub.add_parser("status", help="Show Kairos workspace status.")
     status_parser.add_argument("--root", default=".", help="Project root. Defaults to current directory.")
@@ -133,11 +140,59 @@ def cmd_init(root: str) -> int:
     return 0
 
 
+def cmd_bootstrap(root: str, force: bool) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    store = ScheduleStore(paths)
+    jobs = store.load()
+    default_job = ScheduledJob(
+        id="nightly-journal",
+        name="Nightly Journal Check",
+        schedule={"kind": "daily", "hour": 23, "minute": 0},
+        payload={
+            "kind": "presence_event",
+            "event": "daily_journal_check",
+            "payload": {
+                "message": "今天还没有留下记录。要不要随便丢几个碎片给我，我帮你整理成日记？",
+                "channel": "cli",
+                "to": "local-user",
+            },
+        },
+    )
+    if force or not any(job.id == default_job.id for job in jobs):
+        store.add(default_job)
+        action = "installed"
+    else:
+        action = "kept"
+    print(f"workspace: {paths.home}")
+    print(f"default_nightly_journal: {action}")
+    return 0
+
+
 def cmd_status(root: str) -> int:
     paths = KairosPaths.from_root(Path(root))
     print(f"root: {paths.root}")
     print(f"kairos_home: {paths.home}")
     print(f"initialized: {paths.home.exists()}")
+    return 0
+
+
+def cmd_doctor(root: str) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    print(f"root: {paths.root}")
+    print(f"kairos_home: {paths.home}")
+    print(f"initialized: {paths.home.exists()}")
+    print(f"conversations: {_count_files(paths.conversations, '*.jsonl')}")
+    print(f"journals: {_count_files(paths.journal, '*.md')}")
+    print(f"memories: {len(MemoryStore(paths).list()) if paths.memory.exists() else 0}")
+    print(
+        "memory_candidates: "
+        f"{len(MemoryStore(paths).list(include_candidates=True)) - len(MemoryStore(paths).list()) if paths.memory.exists() else 0}"
+    )
+    print(f"schedules: {len(ScheduleStore(paths).load()) if paths.schedules.exists() else 0}")
+    print(f"delivery_pending: {_count_files(paths.delivery_pending, '*.json')}")
+    print(f"delivery_failed: {_count_files(paths.delivery_failed, '*.json')}")
+    print(f"audit_events: {_count_lines(paths.audit / 'tool-calls.jsonl')}")
     return 0
 
 
@@ -367,6 +422,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "init":
         return cmd_init(args.root)
+    if args.command == "bootstrap":
+        return cmd_bootstrap(args.root, args.force)
+    if args.command == "doctor":
+        return cmd_doctor(args.root)
     if args.command == "status":
         return cmd_status(args.root)
     if args.command == "tools":
@@ -462,6 +521,18 @@ def _default_presence_message(event: PresenceEvent) -> str:
     if event.event == "heartbeat":
         return "Kairos heartbeat check."
     return f"Kairos presence event: {event.event}"
+
+
+def _count_files(path: Path, pattern: str) -> int:
+    if not path.exists():
+        return 0
+    return sum(1 for _ in path.rglob(pattern))
+
+
+def _count_lines(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return len(path.read_text(encoding="utf-8").splitlines())
 
 
 if __name__ == "__main__":

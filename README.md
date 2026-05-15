@@ -33,6 +33,8 @@ src/kairos/
 
 ```text
 python scripts/smoke_check.py
+PYTHONPATH=src python -m kairos.cli bootstrap
+PYTHONPATH=src python -m kairos.cli doctor
 PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
 PYTHONPATH=src python -m kairos.cli chat-once "/tool file.list path=."
