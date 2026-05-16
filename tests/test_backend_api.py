@@ -18,6 +18,7 @@ def test_backend_service_reflect_and_doctor(tmp_path: Path) -> None:
 
     assert bootstrap["default_nightly_journal"] == "installed"
     assert reflected["candidate_count"] >= 1
+    assert reflected["candidates"][0]["reason"]
     assert doctor["journals"] == 1
     assert doctor["memory_candidates"] >= 1
     assert doctor["schedules"] == 1
@@ -69,6 +70,7 @@ def test_backend_service_application_state_and_crud(tmp_path: Path) -> None:
     assert journals["journals"]
     assert confirmed["memory"]["candidate"] is False
     assert memories["summary"]["confirmed"] == 1
+    assert all("candidate_reason" in memory for memory in memories["memories"])
     assert next(job for job in schedules["schedules"] if job["id"] == "check")["enabled"] is False
     assert state["capabilities"]["tools"] >= 3
     assert deleted["deleted"] is True
@@ -143,7 +145,9 @@ def test_http_api_health_and_reflect(tmp_path: Path) -> None:
         assert health["ok"] is True
         assert bootstrap["default_nightly_journal"] == "installed"
         assert reflected["candidate_count"] >= 1
+        assert reflected["candidates"][0]["reason"]
         assert memories["memories"]
+        assert memories["memories"][0]["source_journal_date"]
     finally:
         server.shutdown()
         server.server_close()

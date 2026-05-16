@@ -127,6 +127,16 @@ class KairosBackend:
             "journal_path": str(journal_path),
             "candidate_count": len(candidates),
             "candidate_paths": [str(path) for path in saved],
+            "candidates": [
+                {
+                    "name": candidate.entry.name,
+                    "description": candidate.entry.description,
+                    "type": candidate.entry.type.value,
+                    "reason": candidate.reason,
+                    "source": candidate.entry.source,
+                }
+                for candidate in candidates
+            ],
             "sections": draft.to_markdown_sections(),
         }
 
@@ -536,6 +546,8 @@ def _memory_to_api(entry: MemoryEntry, path: Path, candidate: bool) -> dict[str,
         "scope": entry.scope.value,
         "confidence": entry.confidence,
         "source": entry.source,
+        "candidate_reason": entry.candidate_reason,
+        "source_journal_date": _source_journal_date(entry.source),
         "content": entry.content,
         "candidate": candidate,
         "path": str(path),
@@ -623,6 +635,12 @@ def _find_memory(store: MemoryStore, name: str) -> tuple[MemoryEntry, Path, bool
         if entry.name == name or path.stem == name or str(path) == name:
             return entry, path, candidate
     raise FileNotFoundError(f"Memory not found: {name}")
+
+
+def _source_journal_date(source: str | None) -> str | None:
+    if not source or not source.startswith("journal/"):
+        return None
+    return source.removeprefix("journal/")
 
 
 def _single_line(text: str, limit: int = 120) -> str:

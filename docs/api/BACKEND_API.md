@@ -150,6 +150,22 @@ Body:
 
 Writes a daily journal and optionally saves memory candidates.
 
+The response includes extracted candidate summaries:
+
+```json
+{
+  "candidates": [
+    {
+      "name": "prefer_2026-05-16",
+      "description": "User preference candidate from reflection draft.",
+      "type": "user",
+      "reason": "Positive preference keywords detected",
+      "source": "journal/2026-05-16"
+    }
+  ]
+}
+```
+
 ## Journal
 
 ```text
@@ -233,6 +249,17 @@ GET /api/memories?include_candidates=true
 ```
 
 Returns confirmed memories and, when requested, candidate memories.
+
+Memory entries include candidate review fields:
+
+```json
+{
+  "candidate": true,
+  "candidate_reason": "Positive preference keywords detected",
+  "source": "journal/2026-05-16",
+  "source_journal_date": "2026-05-16"
+}
+```
 
 ```text
 POST /api/memories

@@ -112,6 +112,7 @@ def test_save_candidates_to_store(tmp_path):
     for p in saved_paths:
         assert p.exists()
         assert "candidates" in str(p)
+        assert store.load(p).candidate_reason
 
 
 def test_candidates_not_in_default_list(tmp_path):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -148,6 +149,7 @@ def save_candidates(store: MemoryStore, candidates: list[MemoryCandidate]) -> li
     """
     paths: list[Path] = []
     for candidate in candidates:
-        path = store.save(candidate.entry, candidate=True)
+        entry = replace(candidate.entry, candidate_reason=candidate.reason)
+        path = store.save(entry, candidate=True)
         paths.append(path)
     return paths

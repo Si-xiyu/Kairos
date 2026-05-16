@@ -31,6 +31,7 @@ class MemoryEntry:
     created_at: date = field(default_factory=date.today)
     updated_at: date = field(default_factory=date.today)
     source: str | None = None
+    candidate_reason: str | None = None
 
     def to_markdown(self) -> str:
         frontmatter = {
@@ -44,6 +45,8 @@ class MemoryEntry:
         }
         if self.source:
             frontmatter["source"] = self.source
+        if self.candidate_reason:
+            frontmatter["candidate_reason"] = self.candidate_reason
         lines = ["---", *[f"{key}: {value}" for key, value in frontmatter.items()], "---", ""]
         return "\n".join(lines) + self.content.rstrip() + "\n"
 
@@ -59,6 +62,7 @@ class MemoryEntry:
             created_at=date.fromisoformat(metadata.get("created_at", date.today().isoformat())),
             updated_at=date.fromisoformat(metadata.get("updated_at", date.today().isoformat())),
             source=metadata.get("source") or None,
+            candidate_reason=metadata.get("candidate_reason") or None,
             content=content.strip(),
         )
 

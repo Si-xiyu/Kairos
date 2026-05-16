@@ -51,7 +51,10 @@ def test_fastapi_journal_memory_schedule_workflow(tmp_path: Path) -> None:
 
     assert journal.status_code == 200
     assert reflected.json()["candidate_count"] >= 1
+    assert reflected.json()["candidates"][0]["reason"]
     assert memories.json()["summary"]["candidates"] >= 1
+    assert memories.json()["memories"][0]["candidate_reason"]
+    assert memories.json()["memories"][0]["source_journal_date"] == "2026-05-16"
     assert schedule.json()["id"] == "fastapi-reminder"
     assert toggled.json()["updated"] is True
     assert any(job["id"] == "fastapi-reminder" for job in schedules.json()["schedules"])
