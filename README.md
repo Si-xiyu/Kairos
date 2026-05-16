@@ -60,6 +60,8 @@ Default URL:
 http://127.0.0.1:8765
 ```
 
+The app entrypoint runs FastAPI through Uvicorn. The lower-level service logic stays in `KairosBackend`, so tests can exercise the agent runtime without depending on HTTP transport details.
+
 Frontend agents should use [docs/api/BACKEND_API.md](docs/api/BACKEND_API.md).
 
 The frontend should usually start from `GET /api/state`, then call the narrower journal, memory, schedule, and capability endpoints as needed. The same app entrypoint can serve a built frontend from `frontend/dist`, `frontend/build`, `web/dist`, `web/build`, or `public`.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from kairos.backend.http import run_server
+from kairos.backend.fastapi_app import run_server
 
 
 def build_parser() -> argparse.ArgumentParser:

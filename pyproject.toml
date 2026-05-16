@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Local-first personal AI assistant runtime with coding, memory, lifelog, and presence."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "fastapi>=0.136,<1.0",
+  "uvicorn>=0.47,<1.0",
+]
 
 [project.scripts]
 kairos = "kairos.cli:main"

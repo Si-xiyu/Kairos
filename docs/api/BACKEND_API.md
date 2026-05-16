@@ -6,7 +6,7 @@ Start the backend from the repository root:
 python app.py --root . --host 127.0.0.1 --port 8765
 ```
 
-The backend uses only Python standard library HTTP serving for the first MVP. It returns JSON and enables permissive CORS for local frontend development.
+The backend runs FastAPI through Uvicorn. It returns JSON and enables permissive CORS for local frontend development.
 
 Base URL:
 
