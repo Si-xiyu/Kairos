@@ -2,11 +2,23 @@
 
 This roadmap splits the next product rounds into commit-sized stages. Each completed stage should be tested and committed before moving on, so parallel agents can sync at precise version boundaries.
 
+## Target Product Build Path
+
+The agreed implementation path is:
+
+1. **FastAPI backend** for Kairos agent logic and local data APIs.
+2. **React + Vite frontend** connected to the backend and running in a browser.
+3. **Electron shell** that loads the Vite dev server during development.
+4. **Packaging** with PyInstaller for Python and electron-builder for the whole app.
+5. **Release** as a Windows `.exe` installer.
+
+The current stdlib HTTP backend remains useful as a contract prototype, but it should not become the long-term web framework. The next backend architecture stage is to migrate the existing API surface to FastAPI while preserving route compatibility.
+
 ## Round 1: Application Backend Surface
 
 Goal: make `python app.py` a stable backend surface for the frontend.
 
-Status: mostly complete as of `bd6c3f4`.
+Status: complete through R1-S4. R1-S5 is the framework alignment stage created after the FastAPI/Electron packaging direction was clarified.
 
 Stages:
 
@@ -33,6 +45,19 @@ Stages:
    - compare expected routes with backend routes
    - write handoff notes before waiting for frontend sync
 
+5. **R1-S5 FastAPI Backend Migration**
+   - add FastAPI and Uvicorn dependencies
+   - expose the current backend service through FastAPI routes
+   - keep `python app.py` as the single backend entrypoint
+   - preserve stdlib service tests or replace them with FastAPI TestClient coverage
+   - keep static frontend hosting behavior for Electron/prod builds
+
+6. **R1-S6 React/Vite Dev Proxy Contract**
+   - define backend base URL for the frontend
+   - document Vite dev server and Electron `loadURL`
+   - ensure CORS remains development-friendly
+   - avoid hard-coding production paths in frontend API calls
+
 ## Round 2: Personal Memory and Lifelog Loop
 
 Goal: make Kairos useful as a personal companion, not only a coding shell.
@@ -43,6 +68,7 @@ Stages:
    - persist daily user/Kairos chat fragments into Markdown
    - append rather than overwrite by default
    - expose source metadata for frontend display
+   - status: complete as `3ac8c21`
 
 2. **R2-S2 Memory Review Workflow**
    - classify memory candidates more explicitly
@@ -125,8 +151,8 @@ Goal: turn Kairos into a single ordinary Windows application.
 Stages:
 
 1. **R5-S1 Process Packaging**
-   - single launcher
-   - backend lifecycle management
+   - PyInstaller bundle for the Python/FastAPI backend
+   - single launcher contract between Electron and bundled backend
    - clean logs and crash reports
 
 2. **R5-S2 Tray and Startup**
@@ -144,6 +170,12 @@ Stages:
    - export/import `.kairos`
    - local data directory selection
    - clear memory/journal controls
+
+5. **R5-S5 Installer Release**
+   - electron-builder configuration
+   - bundled backend artifact included in Electron resources
+   - Windows `.exe` installer
+   - first-run bootstrap flow
 
 ## Frontend Checkpoint
 
