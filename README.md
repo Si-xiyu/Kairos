@@ -68,6 +68,8 @@ The frontend should usually start from `GET /api/state`, then call the narrower 
 
 Reference mechanisms absorbed from OpenClaw and the Claude Code teaching repository are tracked in [docs/architecture/REFERENCE_REUSE_PLAN.md](docs/architecture/REFERENCE_REUSE_PLAN.md).
 
+The FastAPI + Vite + Electron launch contract is tracked in [docs/development/APP_LAUNCH_CONTRACT.md](docs/development/APP_LAUNCH_CONTRACT.md).
+
 ## Commander Contracts
 
 The current commander-owned runtime contracts include:
