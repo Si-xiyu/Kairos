@@ -9,6 +9,7 @@ from kairos.channels import ChannelManager, CLIChannel
 from kairos.capabilities import SkillRegistry, list_capabilities
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext
+from kairos.core.session import SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue
 from kairos.lifelog import (
     DailyJournalStore,
@@ -103,6 +104,7 @@ class KairosBackend:
                 "skills": len(capabilities["skills"]),
                 "mcp_plugins": len(capabilities["mcp_plugins"]),
             },
+            "sessions": self.list_sessions(limit=5)["sessions"],
         }
 
     def reflect(
@@ -352,6 +354,56 @@ class KairosBackend:
             "observations": result.observations,
         }
 
+    def create_session(
+        self,
+        session_id: str,
+        title: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        store = SessionStore(self.paths)
+        if title or summary:
+            store.append(
+                session_id,
+                SessionEvent(
+                    role="system",
+                    content=summary or title or "Session created.",
+                    metadata={"title": title or session_id},
+                ),
+            )
+        else:
+            store.path_for(session_id).touch()
+        return {"session": self._session_to_api(session_id, store.read(session_id))}
+
+    def list_sessions(self, limit: int = 50) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        store = SessionStore(self.paths)
+        sessions: list[dict[str, Any]] = []
+        for path in sorted(self.paths.conversations.glob("*.jsonl"), key=_mtime, reverse=True):
+            session_id = path.stem
+            sessions.append(self._session_to_api(session_id, store.read(session_id)))
+            if len(sessions) >= limit:
+                break
+        return {"sessions": sessions}
+
+    def list_session_messages(self, session_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        events = SessionStore(self.paths).read(session_id)
+        return {
+            "session_id": session_id,
+            "messages": [_session_event_to_message(session_id, index, event) for index, event in enumerate(events)],
+        }
+
+    def list_session_events(self, session_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        events = SessionStore(self.paths).read(session_id)
+        agent_events = [
+            _session_event_to_agent_event(session_id, index, event)
+            for index, event in enumerate(events)
+            if event.role in {"tool", "system"} or event.metadata
+        ]
+        return {"session_id": session_id, "events": agent_events}
+
     def capabilities(self) -> dict[str, Any]:
         ensure_workspace(self.paths)
         return list_capabilities(self.paths)
@@ -384,6 +436,20 @@ class KairosBackend:
             "end_date": end_date.isoformat(),
             "path": str(path),
             "content": review_store.read(start_date, end_date),
+        }
+
+    def _session_to_api(self, session_id: str, events: list[SessionEvent]) -> dict[str, Any]:
+        last = events[-1] if events else None
+        user_events = [event for event in events if event.role == "user"]
+        title = _session_title(session_id, events)
+        summary = user_events[-1].content if user_events else (last.content if last else "No messages yet.")
+        return {
+            "id": session_id,
+            "title": title,
+            "summary": _single_line(summary, limit=96),
+            "updatedAt": _relative_or_iso(last.created_at if last else None),
+            "unreadCount": 0,
+            "status": "active" if session_id == "default" else "idle",
         }
 
 
@@ -445,11 +511,100 @@ def _memory_to_api(entry: MemoryEntry, path: Path, candidate: bool) -> dict[str,
     }
 
 
+def _session_event_to_message(session_id: str, index: int, event: SessionEvent) -> dict[str, Any]:
+    role = event.role if event.role in {"user", "assistant", "system"} else "system"
+    return {
+        "id": f"{session_id}-{index}",
+        "sessionId": session_id,
+        "role": role,
+        "author": _author_for_role(event.role),
+        "createdAt": event.created_at,
+        "status": "complete",
+        "blocks": [{"kind": _block_kind(event.content), "content": event.content}],
+    }
+
+
+def _session_event_to_agent_event(session_id: str, index: int, event: SessionEvent) -> dict[str, Any]:
+    if event.role == "tool":
+        kind = "tool_result"
+        title = str(event.metadata.get("tool", "Tool result"))
+        status = "ok" if event.metadata.get("status") == "ok" else "warning"
+    elif event.role == "system":
+        kind = "runtime"
+        title = str(event.metadata.get("title", "Runtime event"))
+        status = "ok"
+    else:
+        kind = "runtime"
+        title = "Message metadata"
+        status = "ok"
+    return {
+        "id": f"{session_id}-event-{index}",
+        "sessionId": session_id,
+        "kind": kind,
+        "title": title,
+        "timestamp": event.created_at,
+        "status": status,
+        "summary": _single_line(event.content, limit=120),
+        "details": _metadata_details(event),
+    }
+
+
+def _session_title(session_id: str, events: list[SessionEvent]) -> str:
+    for event in events:
+        title = event.metadata.get("title")
+        if title:
+            return str(title)
+    for event in events:
+        if event.role == "user" and event.content.strip():
+            return _single_line(event.content, limit=36)
+    return session_id.replace("_", " ").replace("-", " ").title() or "Session"
+
+
+def _author_for_role(role: str) -> str:
+    if role == "user":
+        return "You"
+    if role == "assistant":
+        return "Kairos"
+    if role == "tool":
+        return "Tool"
+    return "System"
+
+
+def _block_kind(content: str) -> str:
+    stripped = content.lstrip()
+    if stripped.startswith("#") or "\n-" in content or "\n```" in content:
+        return "markdown"
+    return "text"
+
+
+def _metadata_details(event: SessionEvent) -> str:
+    if not event.metadata:
+        return event.content
+    import json
+
+    return json.dumps(event.metadata, ensure_ascii=False, indent=2)
+
+
 def _find_memory(store: MemoryStore, name: str) -> tuple[MemoryEntry, Path, bool]:
     for entry, path, candidate in store.list_with_paths(include_candidates=True):
         if entry.name == name or path.stem == name or str(path) == name:
             return entry, path, candidate
     raise FileNotFoundError(f"Memory not found: {name}")
+
+
+def _single_line(text: str, limit: int = 120) -> str:
+    value = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
+
+
+def _relative_or_iso(created_at: str | None) -> str:
+    return created_at or "Never"
+
+
+def _mtime(path: Path) -> float:
+    return path.stat().st_mtime
 
 
 def _date_from_journal_path(path: Path) -> date | None:

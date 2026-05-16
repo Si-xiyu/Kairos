@@ -83,6 +83,54 @@ Returns one frontend-friendly snapshot:
 }
 ```
 
+## Sessions
+
+These routes adapt Kairos JSONL conversation logs to the current React frontend shape.
+
+```text
+GET /api/sessions?limit=50
+```
+
+Returns:
+
+```json
+{
+  "sessions": [
+    {
+      "id": "default",
+      "title": "Default",
+      "summary": "Recent user message...",
+      "updatedAt": "2026-05-16T12:00:00+00:00",
+      "unreadCount": 0,
+      "status": "active"
+    }
+  ]
+}
+```
+
+```text
+POST /api/sessions
+```
+
+Body:
+
+```json
+{
+  "id": "session-ui",
+  "title": "UI integration",
+  "summary": "Frontend adapter smoke session."
+}
+```
+
+```text
+GET /api/sessions/{id}/messages
+GET /api/sessions/{id}/events
+```
+
+Messages are normalized into `{id, sessionId, role, author, createdAt, status, blocks}`.
+
+Events are normalized for the frontend Agent Inspector into `{id, sessionId, kind, title, timestamp, status, summary, details}`.
+
 ## Reflect
 
 ```text

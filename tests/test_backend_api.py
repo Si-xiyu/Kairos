@@ -74,6 +74,27 @@ def test_backend_service_application_state_and_crud(tmp_path: Path) -> None:
     assert deleted["deleted"] is True
 
 
+def test_backend_service_frontend_session_adapter(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.create_session(
+        session_id="session-ui",
+        title="UI integration",
+        summary="Frontend adapter smoke session.",
+    )
+    backend.chat_once("/tool file.list path=.", session="session-ui")
+
+    sessions = backend.list_sessions()
+    messages = backend.list_session_messages("session-ui")
+    events = backend.list_session_events("session-ui")
+    state = backend.state()
+
+    assert sessions["sessions"][0]["id"] == "session-ui"
+    assert messages["messages"][0]["sessionId"] == "session-ui"
+    assert any(message["author"] == "Kairos" for message in messages["messages"])
+    assert any(event["kind"] == "tool_result" for event in events["events"])
+    assert state["sessions"]
+
+
 def test_backend_service_capabilities_discovers_skills(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skills" / "journal-coach"
     skill_dir.mkdir(parents=True)
@@ -135,6 +156,13 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         )
         journals = _request(host, port, "GET", "/api/journals")
         state = _request(host, port, "GET", "/api/state")
+        session = _request(
+            host,
+            port,
+            "POST",
+            "/api/sessions",
+            {"id": "http-ui", "title": "HTTP UI"},
+        )
         schedule = _request(
             host,
             port,
@@ -143,6 +171,9 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
             {"id": "front", "name": "Frontend", "due_now": True},
         )
         schedules = _request(host, port, "GET", "/api/schedules")
+        sessions = _request(host, port, "GET", "/api/sessions")
+        messages = _request(host, port, "GET", "/api/sessions/http-ui/messages")
+        events = _request(host, port, "GET", "/api/sessions/http-ui/events")
         toggled = _request(
             host,
             port,
@@ -161,6 +192,10 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         assert saved["content"].startswith("# 2026-05-16")
         assert journals["journals"][0]["date"] == "2026-05-16"
         assert state["app"]["name"] == "Kairos"
+        assert session["session"]["id"] == "http-ui"
+        assert sessions["sessions"]
+        assert messages["messages"]
+        assert events["events"]
         assert schedules["schedules"]
         assert toggled["updated"] is True
         assert "2026-05-16" in review["content"]

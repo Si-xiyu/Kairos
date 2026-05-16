@@ -46,6 +46,17 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.server.backend.list_journals(limit=limit))
             elif route == "/api/schedules":
                 self._send_json(self.server.backend.list_schedules())
+            elif route == "/api/sessions":
+                limit = int(query.get("limit", ["50"])[0])
+                self._send_json(self.server.backend.list_sessions(limit=limit))
+            elif route.startswith("/api/sessions/"):
+                session_id, child = _session_route(route)
+                if child == "messages":
+                    self._send_json(self.server.backend.list_session_messages(session_id))
+                elif child == "events":
+                    self._send_json(self.server.backend.list_session_events(session_id))
+                else:
+                    self._send_error(404, f"unknown route: {route}")
             elif route == "/api/memories":
                 include = _truthy(query.get("include_candidates", ["false"])[0])
                 self._send_json(self.server.backend.list_memories(include_candidates=include))
@@ -66,6 +77,14 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             if route == "/api/bootstrap":
                 self._send_json(self.server.backend.bootstrap(force=bool(body.get("force", False))))
+            elif route == "/api/sessions":
+                self._send_json(
+                    self.server.backend.create_session(
+                        session_id=str(body["id"]),
+                        title=body.get("title"),
+                        summary=body.get("summary"),
+                    )
+                )
             elif route == "/api/reflect":
                 self._send_json(
                     self.server.backend.reflect(
@@ -269,6 +288,16 @@ def _route_tail(route: str, prefix: str) -> str:
     from urllib.parse import unquote
 
     return unquote(route[len(prefix) :])
+
+
+def _session_route(route: str) -> tuple[str, str]:
+    from urllib.parse import unquote
+
+    tail = route[len("/api/sessions/") :]
+    parts = tail.split("/", 1)
+    session_id = unquote(parts[0])
+    child = parts[1] if len(parts) > 1 else ""
+    return session_id, child
 
 
 def _static_root(root: Path) -> Path | None:
