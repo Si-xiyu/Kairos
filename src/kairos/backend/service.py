@@ -264,6 +264,39 @@ class KairosBackend:
         DailyJournalStore(self.paths).append_fragment(journal_date, heading, text)
         return self.read_journal(journal_date)
 
+    def capture_session_to_journal(
+        self,
+        session_id: str,
+        journal_date: date | None = None,
+        heading: str = "有价值的对话",
+        include_roles: list[str] | None = None,
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        journal_date = journal_date or date.today()
+        include_roles = include_roles or ["user", "assistant"]
+        events = [
+            event
+            for event in SessionStore(self.paths).read(session_id)
+            if event.role in include_roles and event.content.strip()
+        ]
+        if not events:
+            return {
+                **self.read_journal(journal_date),
+                "captured": 0,
+                "session_id": session_id,
+            }
+
+        lines = [f"来源会话：`{session_id}`", ""]
+        for event in events:
+            lines.append(f"- {event.created_at} {_author_for_role(event.role)}: {_single_line(event.content, 300)}")
+
+        DailyJournalStore(self.paths).append_fragment(journal_date, heading, "\n".join(lines))
+        return {
+            **self.read_journal(journal_date),
+            "captured": len(events),
+            "session_id": session_id,
+        }
+
     def add_schedule(
         self,
         job_id: str,

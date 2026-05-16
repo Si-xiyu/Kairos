@@ -109,6 +109,15 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                         heading=str(body.get("heading", "有价值的对话")),
                     )
                 )
+            elif route == "/api/journal/capture-session":
+                self._send_json(
+                    self.server.backend.capture_session_to_journal(
+                        session_id=str(body["session"]),
+                        journal_date=_parse_date(body.get("date")),
+                        heading=str(body.get("heading", "有价值的对话")),
+                        include_roles=body.get("include_roles"),
+                    )
+                )
             elif route == "/api/memories":
                 self._send_json(
                     self.server.backend.save_memory(

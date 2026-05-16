@@ -200,6 +200,32 @@ Body:
 }
 ```
 
+```text
+POST /api/journal/capture-session
+```
+
+Copies a JSONL conversation into a daily Markdown journal section.
+
+Body:
+
+```json
+{
+  "date": "2026-05-16",
+  "session": "daily-chat",
+  "heading": "有价值的对话",
+  "include_roles": ["user", "assistant"]
+}
+```
+
+Returns the updated journal plus:
+
+```json
+{
+  "captured": 2,
+  "session_id": "daily-chat"
+}
+```
+
 ## Memories
 
 ```text

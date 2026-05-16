@@ -95,6 +95,16 @@ def test_backend_service_frontend_session_adapter(tmp_path: Path) -> None:
     assert state["sessions"]
 
 
+def test_backend_service_captures_session_to_journal(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.chat_once("今天和 Kairos 讨论了日记捕获。", session="daily-chat")
+    captured = backend.capture_session_to_journal("daily-chat")
+
+    assert captured["captured"] >= 2
+    assert "来源会话：`daily-chat`" in captured["content"]
+    assert "今天和 Kairos 讨论了日记捕获" in captured["content"]
+
+
 def test_backend_service_capabilities_discovers_skills(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skills" / "journal-coach"
     skill_dir.mkdir(parents=True)
@@ -154,6 +164,14 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
             "/api/journal",
             {"date": "2026-05-16", "content": "# 2026-05-16\n\nhello"},
         )
+        _request(host, port, "POST", "/api/chat", {"text": "写进日记", "session": "http-daily"})
+        captured = _request(
+            host,
+            port,
+            "POST",
+            "/api/journal/capture-session",
+            {"date": "2026-05-16", "session": "http-daily"},
+        )
         journals = _request(host, port, "GET", "/api/journals")
         state = _request(host, port, "GET", "/api/state")
         session = _request(
@@ -190,6 +208,7 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         )
 
         assert saved["content"].startswith("# 2026-05-16")
+        assert captured["captured"] >= 1
         assert journals["journals"][0]["date"] == "2026-05-16"
         assert state["app"]["name"] == "Kairos"
         assert session["session"]["id"] == "http-ui"
