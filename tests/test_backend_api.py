@@ -205,6 +205,50 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
 
+def test_http_static_status_and_frontend_hosting(tmp_path: Path) -> None:
+    server = KairosHTTPServer(("127.0.0.1", 0), root=tmp_path)
+    host, port = server.server_address
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, headers, body = _raw_request(host, port, "GET", "/")
+        assert status == 200
+        assert headers["content-type"].startswith("application/json")
+        assert "Kairos backend is running" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "index.html").write_text("<!doctype html><title>Kairos UI</title>", encoding="utf-8")
+    (public / "app.js").write_text("console.log('kairos')", encoding="utf-8")
+
+    server = KairosHTTPServer(("127.0.0.1", 0), root=tmp_path)
+    host, port = server.server_address
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, headers, body = _raw_request(host, port, "GET", "/")
+        assert status == 200
+        assert "text/html" in headers["content-type"]
+        assert "Kairos UI" in body
+
+        status, headers, body = _raw_request(host, port, "GET", "/app.js")
+        assert status == 200
+        assert "javascript" in headers["content-type"]
+        assert "kairos" in body
+
+        status, headers, body = _raw_request(host, port, "GET", "/deep/link")
+        assert status == 200
+        assert "Kairos UI" in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def _request(
     host: str,
     port: int,
@@ -223,3 +267,13 @@ def _request(
     conn.close()
     assert response.status < 400, data
     return json.loads(data)
+
+
+def _raw_request(host: str, port: int, method: str, path: str) -> tuple[int, dict[str, str], str]:
+    conn = http.client.HTTPConnection(host, port, timeout=5)
+    conn.request(method, path)
+    response = conn.getresponse()
+    data = response.read().decode("utf-8")
+    headers = {key.lower(): value for key, value in response.getheaders()}
+    conn.close()
+    return response.status, headers, data
