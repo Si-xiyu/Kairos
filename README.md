@@ -33,6 +33,7 @@ src/kairos/
 
 ```text
 python scripts/smoke_check.py
+python app.py --root . --host 127.0.0.1 --port 8765
 PYTHONPATH=src python -m kairos.cli bootstrap
 PYTHONPATH=src python -m kairos.cli doctor
 PYTHONPATH=src python -m kairos.cli tools
@@ -44,6 +45,22 @@ PYTHONPATH=src python -m kairos.cli daemon-tick
 ```
 
 For direct module execution before installing the package, set `PYTHONPATH=src`.
+
+## Backend App
+
+Run the backend with one command:
+
+```text
+python app.py
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:8765
+```
+
+Frontend agents should use [docs/api/BACKEND_API.md](docs/api/BACKEND_API.md).
 
 ## Commander Contracts
 

@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 kairos = "kairos.cli:main"
+kairos-app = "kairos.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
