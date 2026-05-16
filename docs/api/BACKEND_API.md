@@ -384,6 +384,19 @@ Body:
 
 Creates a Markdown weekly review draft from existing daily journals.
 
+The response also returns the generated section bullets for frontend preview:
+
+```json
+{
+  "sections": {
+    "这一周你做了什么": ["2026-05-16: 实现 FastAPI 后端"],
+    "哪些事情给你能量": ["2026-05-16: 架构讨论有能量"],
+    "哪些事情反复消耗你": ["2026-05-16: 前端同步反复消耗"],
+    "下周可以调整什么": ["优先减少反复消耗项，为深度工作留出连续时间。"]
+  }
+}
+```
+
 ## Capabilities
 
 ```text

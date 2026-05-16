@@ -466,19 +466,23 @@ class KairosBackend:
         start_date = start_date or (end_date - timedelta(days=6))
         store = DailyJournalStore(self.paths)
         notes: list[str] = []
+        raw_daily: list[tuple[date, str]] = []
         cursor = start_date
         while cursor <= end_date:
             content = store.read(cursor)
             if content.strip():
+                raw_daily.append((cursor, content))
                 notes.append(f"{cursor.isoformat()}: {_preview_markdown(content, limit=160)}")
             cursor += timedelta(days=1)
+        sections = _weekly_sections(raw_daily)
         review_store = WeeklyReviewStore(self.paths)
-        path = review_store.create(start_date, end_date, daily_notes=notes)
+        path = review_store.create(start_date, end_date, daily_notes=notes, section_content=sections)
         return {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "path": str(path),
             "content": review_store.read(start_date, end_date),
+            "sections": sections,
         }
 
     def _session_to_api(self, session_id: str, events: list[SessionEvent]) -> dict[str, Any]:
@@ -641,6 +645,54 @@ def _source_journal_date(source: str | None) -> str | None:
     if not source or not source.startswith("journal/"):
         return None
     return source.removeprefix("journal/")
+
+
+def _weekly_sections(daily_notes: list[tuple[date, str]]) -> dict[str, list[str]]:
+    sections = {
+        "这一周你做了什么": [],
+        "哪些事情给你能量": [],
+        "哪些事情反复消耗你": [],
+        "反复出现的主题": [],
+        "Kairos 观察到的模式": [],
+        "下周可以调整什么": [],
+    }
+    seen_themes: dict[str, int] = {}
+    for day, content in daily_notes:
+        for line in _meaningful_lines(content):
+            prefix = f"{day.isoformat()}: "
+            if _contains_any(line, {"做了", "完成", "实现", "修复", "写", "提交", "推进"}):
+                sections["这一周你做了什么"].append(prefix + line)
+            if _contains_any(line, {"有能量", "有精力", "开心", "兴奋", "满足", "成就"}):
+                sections["哪些事情给你能量"].append(prefix + line)
+            if _contains_any(line, {"消耗", "疲惫", "累", "无力", "压力", "焦虑"}):
+                sections["哪些事情反复消耗你"].append(prefix + line)
+            if _contains_any(line, {"反复", "总是", "经常", "通常", "每次"}):
+                sections["反复出现的主题"].append(prefix + line)
+            for keyword in ("架构", "日记", "记忆", "前端", "后端", "通知", "任务"):
+                if keyword in line:
+                    seen_themes[keyword] = seen_themes.get(keyword, 0) + 1
+
+    repeated = [f"`{theme}` 在本周记录中出现 {count} 次。" for theme, count in seen_themes.items() if count >= 2]
+    sections["Kairos 观察到的模式"].extend(repeated)
+    if sections["哪些事情反复消耗你"]:
+        sections["下周可以调整什么"].append("优先减少反复消耗项，为深度工作留出连续时间。")
+    if sections["哪些事情给你能量"]:
+        sections["下周可以调整什么"].append("保留至少一个带来能量的工作块，不要只安排维护性任务。")
+    if not sections["下周可以调整什么"] and daily_notes:
+        sections["下周可以调整什么"].append("继续记录每天的行动、能量和消耗，先积累更清晰的样本。")
+    return {key: value for key, value in sections.items() if value}
+
+
+def _meaningful_lines(content: str) -> list[str]:
+    return [
+        line.strip("- ").strip()
+        for line in content.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _contains_any(text: str, keywords: set[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
 
 
 def _single_line(text: str, limit: int = 120) -> str:

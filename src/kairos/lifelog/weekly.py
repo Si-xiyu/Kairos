@@ -24,12 +24,21 @@ class WeeklyReviewStore:
     def path_for(self, start_date: date, end_date: date) -> Path:
         return self.base_dir / f"{start_date.isoformat()}_to_{end_date.isoformat()}.md"
 
-    def create(self, start_date: date, end_date: date, daily_notes: list[str] | None = None) -> Path:
+    def create(
+        self,
+        start_date: date,
+        end_date: date,
+        daily_notes: list[str] | None = None,
+        section_content: dict[str, list[str]] | None = None,
+    ) -> Path:
         path = self.path_for(start_date, end_date)
         path.parent.mkdir(parents=True, exist_ok=True)
         content = [f"# Weekly Review: {start_date.isoformat()} - {end_date.isoformat()}", ""]
         for section in WEEKLY_SECTIONS:
             content.extend([f"## {section}", ""])
+            for item in (section_content or {}).get(section, []):
+                content.append(f"- {item}")
+            content.append("")
         if daily_notes:
             content.extend(["## 每日记录", ""])
             content.extend(f"- {note}" for note in daily_notes)

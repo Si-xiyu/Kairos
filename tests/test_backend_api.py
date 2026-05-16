@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from datetime import date
 from pathlib import Path
 from threading import Thread
 
@@ -105,6 +106,25 @@ def test_backend_service_captures_session_to_journal(tmp_path: Path) -> None:
     assert captured["captured"] >= 2
     assert "来源会话：`daily-chat`" in captured["content"]
     assert "今天和 Kairos 讨论了日记捕获" in captured["content"]
+
+
+def test_backend_service_weekly_review_summarizes_journals(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.save_journal(
+        "# 2026-05-16\n\n## 做了哪些事情\n\n实现 FastAPI 后端，很有成就。\n\n## 情绪与能量\n\n前端同步反复消耗，但架构讨论有能量。",
+        journal_date=date(2026, 5, 16),
+    )
+
+    review = backend.weekly_review(
+        start_date=date(2026, 5, 16),
+        end_date=date(2026, 5, 16),
+    )
+
+    assert review["sections"]["这一周你做了什么"]
+    assert review["sections"]["哪些事情给你能量"]
+    assert review["sections"]["哪些事情反复消耗你"]
+    assert "实现 FastAPI 后端" in review["content"]
+    assert "优先减少反复消耗项" in review["content"]
 
 
 def test_backend_service_capabilities_discovers_skills(tmp_path: Path) -> None:

@@ -77,3 +77,24 @@ def test_weekly_review_create_read(tmp_path):
     assert "Weekly Review: 2026-05-11 - 2026-05-17" in content
     assert "哪些事情给你能量" in content
     assert "2026-05-15.md" in content
+
+
+def test_weekly_review_create_with_section_content(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    store = WeeklyReviewStore(paths)
+    start = date(2026, 5, 11)
+    end = date(2026, 5, 17)
+
+    path = store.create(
+        start,
+        end,
+        section_content={
+            "这一周你做了什么": ["实现 FastAPI 后端"],
+            "下周可以调整什么": ["减少反复消耗"],
+        },
+    )
+    content = path.read_text(encoding="utf-8")
+
+    assert "- 实现 FastAPI 后端" in content
+    assert "- 减少反复消耗" in content
