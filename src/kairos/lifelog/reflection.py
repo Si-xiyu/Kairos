@@ -41,7 +41,7 @@ class DailyReflectionDraft:
             "情绪与能量": "\n".join(self.energy) if self.energy else "",
             "有价值的对话": "\n".join(self.valuable_conversations) if self.valuable_conversations else "",
             "Kairos 的观察": "\n".join(self.kairos_observations) if self.kairos_observations else "",
-            "明天可以轻轻推进的事": "\n".join(self.tomorrow) if self.tomorrow else "",
+            "明天可以推进的事": "\n".join(self.tomorrow) if self.tomorrow else "",
         }
 
 
@@ -111,7 +111,7 @@ def write_reflection_draft(store: DailyJournalStore, draft: DailyReflectionDraft
         "情绪与能量": "情绪与能量",
         "有价值的对话": "有价值的对话",
         "Kairos 的观察": "Kairos 的观察",
-        "明天可以轻轻推进的事": "明天可以轻轻推进的事",
+        "明天可以推进的事": "明天可以推进的事",
     }
 
     for section_key, section_text in sections.items():

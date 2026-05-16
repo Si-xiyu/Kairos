@@ -62,6 +62,27 @@ Returns local workspace counts:
 }
 ```
 
+## Application State
+
+```text
+GET /api/state
+```
+
+Returns one frontend-friendly snapshot:
+
+```json
+{
+  "app": {"name": "Kairos", "mode": "local-first-backend"},
+  "doctor": {},
+  "today": {"date": "2026-05-16", "journal_exists": true},
+  "recent_journals": [],
+  "memories": {"confirmed": 1, "candidates": 0, "total": 1},
+  "schedules": {"total": 1, "enabled": 1, "due": 0, "items": []},
+  "delivery": {"pending": 0, "failed": 0},
+  "capabilities": {"tools": 3, "skills": 0, "mcp_plugins": 0}
+}
+```
+
 ## Reflect
 
 ```text
@@ -98,6 +119,39 @@ Returns:
 }
 ```
 
+```text
+GET /api/journals?limit=30
+```
+
+Lists journal files, newest first.
+
+```text
+POST /api/journal
+```
+
+Body:
+
+```json
+{
+  "date": "2026-05-16",
+  "content": "# 2026-05-16\n\n## 今天发生了什么\n\n..."
+}
+```
+
+```text
+POST /api/journal/append
+```
+
+Body:
+
+```json
+{
+  "date": "2026-05-16",
+  "heading": "有价值的对话",
+  "text": "今天和 Kairos 梳理了第一轮后端。"
+}
+```
+
 ## Memories
 
 ```text
@@ -106,7 +160,49 @@ GET /api/memories?include_candidates=true
 
 Returns confirmed memories and, when requested, candidate memories.
 
+```text
+POST /api/memories
+```
+
+Creates a confirmed memory or a candidate:
+
+```json
+{
+  "name": "prefers_architecture_first",
+  "description": "User likes discussing architecture before implementation.",
+  "type": "user",
+  "scope": "private",
+  "confidence": 0.7,
+  "candidate": false,
+  "content": "用户喜欢先讨论架构，再进入实现。"
+}
+```
+
+```text
+POST /api/memories/confirm
+POST /api/memories/update
+POST /api/memories/delete
+```
+
+Confirm body:
+
+```json
+{"name": "prefers_architecture_first"}
+```
+
+Delete body:
+
+```json
+{"name": "prefers_architecture_first", "candidate": false}
+```
+
 ## Schedule
+
+```text
+GET /api/schedules
+```
+
+Lists all scheduled jobs.
 
 ```text
 POST /api/schedules
@@ -132,6 +228,17 @@ Supported `kind` values for the frontend MVP:
 - `at`
 
 For `at`, pass an ISO datetime in `at`, unless `due_now` is true.
+
+```text
+POST /api/schedules/toggle
+POST /api/schedules/delete
+```
+
+Toggle body:
+
+```json
+{"id": "demo", "enabled": false}
+```
 
 ## Daemon Tick
 
@@ -159,3 +266,41 @@ Body:
 
 Runs one deterministic `AgentLoop` turn. This does not call an LLM yet.
 
+## Weekly Review
+
+```text
+POST /api/reviews/weekly
+```
+
+Body:
+
+```json
+{
+  "start_date": "2026-05-10",
+  "end_date": "2026-05-16"
+}
+```
+
+Creates a Markdown weekly review draft from existing daily journals.
+
+## Capabilities
+
+```text
+GET /api/capabilities
+GET /api/skills
+GET /api/skills/{name}
+```
+
+Capabilities exposes:
+
+- native tools,
+- skill manifests discovered from `skills/**/SKILL.md` and `.kairos/skills/**/SKILL.md`,
+- MCP/plugin manifests discovered from known local plugin locations.
+
+MCP/plugin manifests are discovery-only in this round. Live MCP transport comes later, and must still route through the shared permission layer.
+
+## Static Frontend
+
+`python app.py` also checks common frontend output folders such as `frontend/dist`, `frontend/build`, `web/dist`, `web/build`, and `public`.
+
+If an `index.html` exists there, non-API routes serve the frontend. Otherwise `/` returns a small JSON backend status response.

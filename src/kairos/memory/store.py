@@ -43,6 +43,13 @@ class MemoryStore:
         mem_type: MemoryType | None = None,
         include_candidates: bool = False,
     ) -> list[MemoryEntry]:
+        return [entry for entry, _path, _candidate in self.list_with_paths(mem_type, include_candidates)]
+
+    def list_with_paths(
+        self,
+        mem_type: MemoryType | None = None,
+        include_candidates: bool = False,
+    ) -> list[tuple[MemoryEntry, Path, bool]]:
         dirs: list[Path]
         if mem_type is None:
             dirs = [self.base_dir / item.value for item in MemoryType]
@@ -54,12 +61,18 @@ class MemoryStore:
         if include_candidates and mem_type is None:
             dirs.append(self.candidates_dir)
 
-        entries: list[MemoryEntry] = []
+        entries: list[tuple[MemoryEntry, Path, bool]] = []
         for directory in dirs:
             if not directory.exists():
                 continue
             for path in sorted(directory.glob("*.md")):
-                entries.append(MemoryEntry.from_markdown(path.read_text(encoding="utf-8")))
+                entries.append(
+                    (
+                        MemoryEntry.from_markdown(path.read_text(encoding="utf-8")),
+                        path,
+                        directory == self.candidates_dir,
+                    )
+                )
         return entries
 
     def delete(self, name: str, include_candidates: bool = True) -> bool:
@@ -68,6 +81,23 @@ class MemoryStore:
             return False
         path.unlink()
         self.rebuild_index()
+        return True
+
+    def confirm_candidate(self, name: str) -> Path:
+        path = self._resolve_candidate(name)
+        if path is None or not path.exists():
+            raise FileNotFoundError(f"Memory candidate not found: {name}")
+        entry = MemoryEntry.from_markdown(path.read_text(encoding="utf-8"))
+        confirmed_path = self.save(entry, candidate=False)
+        path.unlink()
+        self.rebuild_index()
+        return confirmed_path
+
+    def delete_candidate(self, name: str) -> bool:
+        path = self._resolve_candidate(name)
+        if path is None or not path.exists():
+            return False
+        path.unlink()
         return True
 
     def rebuild_index(self) -> Path:
@@ -105,6 +135,12 @@ class MemoryStore:
             if candidate.exists():
                 return candidate
         return None
+
+    def _resolve_candidate(self, name: str) -> Path | None:
+        value = Path(name)
+        if value.exists() or value.suffix == ".md" or value.parent != Path("."):
+            return value
+        return self.candidates_dir / f"{_safe_name(name)}.md"
 
 
 def _safe_name(value: str) -> str:

@@ -156,6 +156,21 @@ class ScheduledJob:
             disabled_reason=None if enabled else "max_failures_exceeded",
         )
 
+    def with_enabled(self, enabled: bool) -> "ScheduledJob":
+        return ScheduledJob(
+            id=self.id,
+            name=self.name,
+            schedule=self.schedule,
+            payload=self.payload,
+            enabled=enabled,
+            last_run_at=self.last_run_at,
+            next_run_at=self.next_run_at,
+            failure_count=self.failure_count,
+            max_failures=self.max_failures,
+            last_error=self.last_error,
+            disabled_reason=None if enabled else "disabled_by_user",
+        )
+
 
 @dataclass(frozen=True)
 class ScheduleStore:
@@ -210,6 +225,29 @@ class ScheduleStore:
 
     def update(self, job: ScheduledJob) -> None:
         self.upsert(job)
+
+    def delete(self, job_id: str) -> bool:
+        jobs = self.load()
+        updated = [job for job in jobs if job.id != job_id]
+        if len(updated) == len(jobs):
+            return False
+        self.save(updated)
+        return True
+
+    def set_enabled(self, job_id: str, enabled: bool) -> bool:
+        jobs = self.load()
+        found = False
+        updated: list[ScheduledJob] = []
+        for job in jobs:
+            if job.id == job_id:
+                updated.append(job.with_enabled(enabled))
+                found = True
+            else:
+                updated.append(job)
+        if not found:
+            return False
+        self.save(updated)
+        return True
 
     def mark_success(self, job_id: str, now: datetime | None = None) -> None:
         now = _coerce_datetime(now) or datetime.now(timezone.utc)

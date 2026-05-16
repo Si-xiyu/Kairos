@@ -43,6 +43,55 @@ def test_backend_service_schedule_tick_and_chat(tmp_path: Path) -> None:
     assert "tool file.list: ok" in chat["outbound"][0]["text"]
 
 
+def test_backend_service_application_state_and_crud(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.bootstrap()
+
+    journal = backend.save_journal("# 2026-05-16\n\n## 今天发生了什么\n\n写 Kairos 后端。")
+    backend.append_journal("补齐第一轮 API。", heading="做了哪些事情")
+    memory = backend.save_memory(
+        name="prefers_architecture_first",
+        description="User likes discussing architecture first.",
+        content="用户喜欢先讨论架构，再进入实现。",
+        candidate=True,
+    )
+    confirmed = backend.confirm_memory(memory["memory"]["name"])
+    backend.add_schedule(job_id="check", name="Check", due_now=True)
+    backend.set_schedule_enabled("check", False)
+
+    state = backend.state()
+    journals = backend.list_journals()
+    memories = backend.list_memories(include_candidates=True)
+    schedules = backend.list_schedules()
+    deleted = backend.delete_schedule("check")
+
+    assert journal["exists"] is True
+    assert journals["journals"]
+    assert confirmed["memory"]["candidate"] is False
+    assert memories["summary"]["confirmed"] == 1
+    assert next(job for job in schedules["schedules"] if job["id"] == "check")["enabled"] is False
+    assert state["capabilities"]["tools"] >= 3
+    assert deleted["deleted"] is True
+
+
+def test_backend_service_capabilities_discovers_skills(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skills" / "journal-coach"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: journal-coach\ndescription: Guide reflective journaling.\n---\n\n# Journal Coach\n",
+        encoding="utf-8",
+    )
+    backend = KairosBackend(tmp_path)
+
+    skills = backend.list_skills()
+    skill = backend.read_skill("journal-coach")
+    capabilities = backend.capabilities()
+
+    assert skills["skills"][0]["name"] == "journal-coach"
+    assert "Journal Coach" in skill["body"]
+    assert capabilities["skills"][0]["name"] == "journal-coach"
+
+
 def test_http_api_health_and_reflect(tmp_path: Path) -> None:
     server = KairosHTTPServer(("127.0.0.1", 0), root=tmp_path)
     host, port = server.server_address
@@ -64,6 +113,57 @@ def test_http_api_health_and_reflect(tmp_path: Path) -> None:
         assert bootstrap["default_nightly_journal"] == "installed"
         assert reflected["candidate_count"] >= 1
         assert memories["memories"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_http_api_application_endpoints(tmp_path: Path) -> None:
+    server = KairosHTTPServer(("127.0.0.1", 0), root=tmp_path)
+    host, port = server.server_address
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _request(host, port, "POST", "/api/bootstrap", {})
+        saved = _request(
+            host,
+            port,
+            "POST",
+            "/api/journal",
+            {"date": "2026-05-16", "content": "# 2026-05-16\n\nhello"},
+        )
+        journals = _request(host, port, "GET", "/api/journals")
+        state = _request(host, port, "GET", "/api/state")
+        schedule = _request(
+            host,
+            port,
+            "POST",
+            "/api/schedules",
+            {"id": "front", "name": "Frontend", "due_now": True},
+        )
+        schedules = _request(host, port, "GET", "/api/schedules")
+        toggled = _request(
+            host,
+            port,
+            "POST",
+            "/api/schedules/toggle",
+            {"id": schedule["id"], "enabled": False},
+        )
+        review = _request(
+            host,
+            port,
+            "POST",
+            "/api/reviews/weekly",
+            {"start_date": "2026-05-16", "end_date": "2026-05-16"},
+        )
+
+        assert saved["content"].startswith("# 2026-05-16")
+        assert journals["journals"][0]["date"] == "2026-05-16"
+        assert state["app"]["name"] == "Kairos"
+        assert schedules["schedules"]
+        assert toggled["updated"] is True
+        assert "2026-05-16" in review["content"]
     finally:
         server.shutdown()
         server.server_close()

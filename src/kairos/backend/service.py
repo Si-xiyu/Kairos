@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from kairos.channels import ChannelManager, CLIChannel
+from kairos.capabilities import SkillRegistry, list_capabilities
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext
 from kairos.delivery import DeliveryQueue
-from kairos.lifelog import DailyJournalStore, JournalDraftBuilder, ReflectionFragment, write_reflection_draft
-from kairos.memory import MemoryStore
+from kairos.lifelog import (
+    DailyJournalStore,
+    JournalDraftBuilder,
+    ReflectionFragment,
+    WeeklyReviewStore,
+    write_reflection_draft,
+)
+from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
 from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 from kairos.messages import InboundMessage, OutboundMessage
 from kairos.permissions import AutonomyLevel
@@ -63,6 +71,40 @@ class KairosBackend:
             "audit_events": _count_lines(self.paths.audit / "tool-calls.jsonl"),
         }
 
+    def state(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        doctor = self.doctor()
+        today = date.today()
+        journal_store = DailyJournalStore(self.paths)
+        schedules = self.list_schedules()["schedules"]
+        capabilities = self.capabilities()
+        return {
+            "app": {"name": "Kairos", "mode": "local-first-backend"},
+            "doctor": doctor,
+            "today": {
+                "date": today.isoformat(),
+                "journal_exists": journal_store.exists(today),
+                "journal_path": str(journal_store.path_for(today)),
+            },
+            "recent_journals": self.list_journals(limit=7)["journals"],
+            "memories": self.list_memories(include_candidates=True)["summary"],
+            "schedules": {
+                "total": len(schedules),
+                "enabled": sum(1 for job in schedules if job["enabled"]),
+                "due": len(ScheduleStore(self.paths).due()),
+                "items": schedules[:5],
+            },
+            "delivery": {
+                "pending": _count_files(self.paths.delivery_pending, "*.json"),
+                "failed": _count_files(self.paths.delivery_failed, "*.json"),
+            },
+            "capabilities": {
+                "tools": len(capabilities["tools"]),
+                "skills": len(capabilities["skills"]),
+                "mcp_plugins": len(capabilities["mcp_plugins"]),
+            },
+        }
+
     def reflect(
         self,
         text: str,
@@ -88,21 +130,86 @@ class KairosBackend:
 
     def list_memories(self, include_candidates: bool = False) -> dict[str, Any]:
         ensure_workspace(self.paths)
-        entries = MemoryStore(self.paths).list(include_candidates=include_candidates)
+        entries = MemoryStore(self.paths).list_with_paths(include_candidates=include_candidates)
+        confirmed = [item for item in entries if not item[2]]
+        candidates = [item for item in entries if item[2]]
         return {
+            "summary": {
+                "confirmed": len(confirmed),
+                "candidates": len(candidates),
+                "total": len(entries),
+            },
             "memories": [
-                {
-                    "name": entry.name,
-                    "description": entry.description,
-                    "type": entry.type.value,
-                    "scope": entry.scope.value,
-                    "confidence": entry.confidence,
-                    "source": entry.source,
-                    "content": entry.content,
-                }
-                for entry in entries
+                _memory_to_api(entry, path, candidate)
+                for entry, path, candidate in entries
             ]
         }
+
+    def save_memory(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        memory_type: str = "user",
+        scope: str = "private",
+        confidence: float = 0.7,
+        source: str | None = "api",
+        candidate: bool = False,
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        entry = MemoryEntry(
+            name=name,
+            description=description,
+            type=MemoryType(memory_type),
+            scope=MemoryScope(scope),
+            confidence=confidence,
+            source=source,
+            content=content,
+        )
+        path = MemoryStore(self.paths).save(entry, candidate=candidate)
+        return {"memory": _memory_to_api(entry, path, candidate)}
+
+    def confirm_memory(self, name: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        store = MemoryStore(self.paths)
+        path = store.confirm_candidate(name)
+        entry = store.load(path, include_candidates=False)
+        return {"memory": _memory_to_api(entry, path, False)}
+
+    def update_memory(
+        self,
+        name: str,
+        description: str | None = None,
+        content: str | None = None,
+        confidence: float | None = None,
+        candidate: bool | None = None,
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        store = MemoryStore(self.paths)
+        entry, old_path, old_candidate = _find_memory(store, name)
+        target_candidate = old_candidate if candidate is None else candidate
+        updated = replace(
+            entry,
+            description=description if description is not None else entry.description,
+            content=content if content is not None else entry.content,
+            confidence=confidence if confidence is not None else entry.confidence,
+            updated_at=date.today(),
+        )
+        path = store.save(updated, candidate=target_candidate)
+        if old_path.exists() and old_path != path:
+            old_path.unlink()
+        if not target_candidate:
+            store.rebuild_index()
+        return {"memory": _memory_to_api(updated, path, target_candidate)}
+
+    def delete_memory(self, name: str, candidate: bool | None = None) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        store = MemoryStore(self.paths)
+        if candidate is True:
+            deleted = store.delete_candidate(name)
+        else:
+            deleted = store.delete(name, include_candidates=candidate is not False)
+        return {"deleted": deleted}
 
     def read_journal(self, journal_date: date | None = None) -> dict[str, Any]:
         ensure_workspace(self.paths)
@@ -115,6 +222,45 @@ class KairosBackend:
             "exists": path.exists(),
             "content": store.read(journal_date),
         }
+
+    def list_journals(self, limit: int = 30) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        journals: list[dict[str, Any]] = []
+        for path in sorted(self.paths.journal.rglob("*.md"), reverse=True):
+            journal_date = _date_from_journal_path(path)
+            content = path.read_text(encoding="utf-8")
+            journals.append(
+                {
+                    "date": journal_date.isoformat() if journal_date else path.stem,
+                    "path": str(path),
+                    "title": content.splitlines()[0] if content.splitlines() else path.stem,
+                    "preview": _preview_markdown(content),
+                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                }
+            )
+            if len(journals) >= limit:
+                break
+        return {"journals": journals}
+
+    def save_journal(self, content: str, journal_date: date | None = None) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        journal_date = journal_date or date.today()
+        store = DailyJournalStore(self.paths)
+        path = store.path_for(journal_date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        return self.read_journal(journal_date)
+
+    def append_journal(
+        self,
+        text: str,
+        journal_date: date | None = None,
+        heading: str = "有价值的对话",
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        journal_date = journal_date or date.today()
+        DailyJournalStore(self.paths).append_fragment(journal_date, heading, text)
+        return self.read_journal(journal_date)
 
     def add_schedule(
         self,
@@ -150,6 +296,19 @@ class KairosBackend:
         )
         ScheduleStore(self.paths).add(job)
         return {"id": job.id, "name": job.name, "schedule": job.schedule, "payload": job.payload}
+
+    def list_schedules(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"schedules": [_job_to_api(job) for job in ScheduleStore(self.paths).load()]}
+
+    def delete_schedule(self, job_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"deleted": ScheduleStore(self.paths).delete(job_id)}
+
+    def set_schedule_enabled(self, job_id: str, enabled: bool) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        updated = ScheduleStore(self.paths).set_enabled(job_id, enabled)
+        return {"updated": updated}
 
     def daemon_tick(self) -> dict[str, Any]:
         ensure_workspace(self.paths)
@@ -193,6 +352,40 @@ class KairosBackend:
             "observations": result.observations,
         }
 
+    def capabilities(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return list_capabilities(self.paths)
+
+    def list_skills(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"skills": [skill.manifest() for skill in SkillRegistry(self.paths).list()]}
+
+    def read_skill(self, name: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        skill = SkillRegistry(self.paths).load(name)
+        return {**skill.manifest(), "body": skill.body}
+
+    def weekly_review(self, start_date: date | None = None, end_date: date | None = None) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        end_date = end_date or date.today()
+        start_date = start_date or (end_date - timedelta(days=6))
+        store = DailyJournalStore(self.paths)
+        notes: list[str] = []
+        cursor = start_date
+        while cursor <= end_date:
+            content = store.read(cursor)
+            if content.strip():
+                notes.append(f"{cursor.isoformat()}: {_preview_markdown(content, limit=160)}")
+            cursor += timedelta(days=1)
+        review_store = WeeklyReviewStore(self.paths)
+        path = review_store.create(start_date, end_date, daily_notes=notes)
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "path": str(path),
+            "content": review_store.read(start_date, end_date),
+        }
+
 
 def _presence_handler(event: PresenceEvent, now: datetime):
     message = event.payload.get("message") or _default_presence_message(event)
@@ -225,6 +418,57 @@ def _count_lines(path: Path) -> int:
     if not path.exists():
         return 0
     return len(path.read_text(encoding="utf-8").splitlines())
+
+
+def _job_to_api(job: ScheduledJob) -> dict[str, Any]:
+    data = job.to_json()
+    computed_next = job.next_due_after(datetime.now(timezone.utc)) if job.enabled else None
+    data["next_run_at"] = data.get("next_run_at") or (
+        computed_next.isoformat() if computed_next is not None else None
+    )
+    return data
+
+
+def _memory_to_api(entry: MemoryEntry, path: Path, candidate: bool) -> dict[str, Any]:
+    return {
+        "name": entry.name,
+        "description": entry.description,
+        "type": entry.type.value,
+        "scope": entry.scope.value,
+        "confidence": entry.confidence,
+        "source": entry.source,
+        "content": entry.content,
+        "candidate": candidate,
+        "path": str(path),
+        "created_at": entry.created_at.isoformat(),
+        "updated_at": entry.updated_at.isoformat(),
+    }
+
+
+def _find_memory(store: MemoryStore, name: str) -> tuple[MemoryEntry, Path, bool]:
+    for entry, path, candidate in store.list_with_paths(include_candidates=True):
+        if entry.name == name or path.stem == name or str(path) == name:
+            return entry, path, candidate
+    raise FileNotFoundError(f"Memory not found: {name}")
+
+
+def _date_from_journal_path(path: Path) -> date | None:
+    try:
+        return date.fromisoformat(path.stem)
+    except ValueError:
+        return None
+
+
+def _preview_markdown(content: str, limit: int = 240) -> str:
+    lines = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    preview = " ".join(lines)
+    if len(preview) <= limit:
+        return preview
+    return preview[: limit - 3].rstrip() + "..."
 
 
 def _coerce_datetime(value: datetime) -> datetime:
