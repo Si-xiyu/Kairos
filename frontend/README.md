@@ -17,18 +17,33 @@ If the global npm cache is not writable, use `npm.cmd install --cache .\.npm-cac
 
 ## Current Scope
 
-- Static mock sessions, messages, and Agent Inspector events.
+- REST-backed sessions, messages, chat turns, and Agent Inspector events.
 - Desktop-style three-pane Agent console: sessions, message stream, inspector.
 - Local UI state for sending, stopping, session selection, event folding, and search.
-- No backend calls are made yet.
+- Backend status ribbon with the active API base URL.
 
-## API / WebSocket Handoff
+## API Boundary
 
-The API boundary is isolated in `src/services/agentApi.ts`. Replace the mock implementations there with:
+The API boundary is isolated in `src/services/agentApi.ts`.
+
+By default it calls:
+
+```text
+http://127.0.0.1:8765
+```
+
+Override with:
+
+```powershell
+$env:VITE_KAIROS_API_BASE = "http://127.0.0.1:8765"
+```
+
+Implemented calls:
 
 - `GET /api/sessions` for conversation summaries.
-- `GET /api/sessions/:id/messages` for persisted message history.
-- `POST /api/chat` or a WebSocket `client_message` event for user input.
-- WebSocket events for streaming assistant deltas, tool calls, tool results, runtime status, and memory events.
+- `POST /api/sessions` for new session records.
+- `GET /api/sessions/{id}/messages` for persisted message history.
+- `GET /api/sessions/{id}/events` for inspector events.
+- `POST /api/chat` for deterministic local agent turns.
 
-Keep the UI state shape in `src/types.ts` stable where possible. The Agent Inspector expects normalized `AgentEvent` records rather than raw log lines.
+Future WebSocket work should keep the UI state shape in `src/types.ts` stable where possible. The Agent Inspector expects normalized `AgentEvent` records rather than raw log lines.

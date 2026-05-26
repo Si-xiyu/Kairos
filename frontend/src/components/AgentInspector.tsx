@@ -3,6 +3,7 @@ import type { AgentEvent, AgentEventKind } from "../types";
 
 type Props = {
   events: AgentEvent[];
+  backendStatus: "online" | "offline";
 };
 
 const labels: Record<AgentEventKind, string> = {
@@ -12,7 +13,7 @@ const labels: Record<AgentEventKind, string> = {
   memory: "Memory",
 };
 
-export function AgentInspector({ events }: Props) {
+export function AgentInspector({ events, backendStatus }: Props) {
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(events.slice(0, 2).map((event) => event.id)));
 
   useEffect(() => {
@@ -44,11 +45,11 @@ export function AgentInspector({ events }: Props) {
       <div className="runtime-strip">
         <div>
           <span>Runtime</span>
-          <strong>Mock local</strong>
+          <strong>{backendStatus === "online" ? "FastAPI" : "Offline"}</strong>
         </div>
         <div>
           <span>Transport</span>
-          <strong>API slot</strong>
+          <strong>REST</strong>
         </div>
       </div>
 

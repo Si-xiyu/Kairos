@@ -48,3 +48,17 @@ export type AgentEvent = {
   summary: string;
   details: string;
 };
+
+export type ChatResponse = {
+  outbound: Array<{
+    channel: string;
+    to: string;
+    text: string;
+  }>;
+  observations: string[];
+};
+
+export type BackendHealth = {
+  ok: boolean;
+  service: string;
+};
