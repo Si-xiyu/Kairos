@@ -123,6 +123,25 @@ Body:
 ```
 
 ```text
+GET /api/sessions/{id}
+```
+
+Returns one normalized session:
+
+```json
+{
+  "session": {
+    "id": "session-ui",
+    "title": "UI integration",
+    "summary": "Recent user message...",
+    "updatedAt": "2026-05-16T12:00:00+00:00",
+    "unreadCount": 0,
+    "status": "idle"
+  }
+}
+```
+
+```text
 GET /api/sessions/{id}/messages
 GET /api/sessions/{id}/events
 ```
@@ -366,6 +385,20 @@ Body:
 ```
 
 Runs one deterministic `AgentLoop` turn. This does not call an LLM yet.
+
+The response is optimized for frontend handoff: it keeps the original
+`outbound` and `observations` fields, and also returns the refreshed
+`session`, `messages`, and Inspector `events` for the target session.
+
+```json
+{
+  "outbound": [{"channel": "api", "to": "api-user", "text": "tool file.list: ok"}],
+  "observations": ["tool file.list: ok"],
+  "session": {"id": "default", "title": "Default"},
+  "messages": [],
+  "events": []
+}
+```
 
 ## Weekly Review
 

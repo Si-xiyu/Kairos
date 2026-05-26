@@ -73,6 +73,10 @@ def create_app(root: Path) -> FastAPI:
     def session_events(session_id: str) -> dict[str, Any]:
         return _backend(app).list_session_events(session_id)
 
+    @app.get("/api/sessions/{session_id}")
+    def session(session_id: str) -> dict[str, Any]:
+        return _backend(app).read_session(session_id)
+
     @app.post("/api/reflect")
     def reflect(body: dict[str, Any]) -> dict[str, Any]:
         return _backend(app).reflect(

@@ -55,6 +55,8 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(self.server.backend.list_session_messages(session_id))
                 elif child == "events":
                     self._send_json(self.server.backend.list_session_events(session_id))
+                elif child == "":
+                    self._send_json(self.server.backend.read_session(session_id))
                 else:
                     self._send_error(404, f"unknown route: {route}")
             elif route == "/api/memories":

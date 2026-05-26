@@ -395,6 +395,7 @@ class KairosBackend:
                 for message in result.outbound
             ],
             "observations": result.observations,
+            **self._session_payload(session),
         }
 
     def create_session(
@@ -429,6 +430,10 @@ class KairosBackend:
                 break
         return {"sessions": sessions}
 
+    def read_session(self, session_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"session": self._session_to_api(session_id, SessionStore(self.paths).read(session_id))}
+
     def list_session_messages(self, session_id: str) -> dict[str, Any]:
         ensure_workspace(self.paths)
         events = SessionStore(self.paths).read(session_id)
@@ -446,6 +451,19 @@ class KairosBackend:
             if event.role in {"tool", "system"} or event.metadata
         ]
         return {"session_id": session_id, "events": agent_events}
+
+    def _session_payload(self, session_id: str) -> dict[str, Any]:
+        store = SessionStore(self.paths)
+        events = store.read(session_id)
+        return {
+            "session": self._session_to_api(session_id, events),
+            "messages": [_session_event_to_message(session_id, index, event) for index, event in enumerate(events)],
+            "events": [
+                _session_event_to_agent_event(session_id, index, event)
+                for index, event in enumerate(events)
+                if event.role in {"tool", "system"} or event.metadata
+            ],
+        }
 
     def capabilities(self) -> dict[str, Any]:
         ensure_workspace(self.paths)

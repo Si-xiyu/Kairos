@@ -87,14 +87,20 @@ def test_backend_service_frontend_session_adapter(tmp_path: Path) -> None:
     backend.chat_once("/tool file.list path=.", session="session-ui")
 
     sessions = backend.list_sessions()
+    session = backend.read_session("session-ui")
     messages = backend.list_session_messages("session-ui")
     events = backend.list_session_events("session-ui")
+    chat = backend.chat_once("plain follow up", session="session-ui")
     state = backend.state()
 
     assert sessions["sessions"][0]["id"] == "session-ui"
+    assert session["session"]["id"] == "session-ui"
     assert messages["messages"][0]["sessionId"] == "session-ui"
     assert any(message["author"] == "Kairos" for message in messages["messages"])
     assert any(event["kind"] == "tool_result" for event in events["events"])
+    assert chat["session"]["id"] == "session-ui"
+    assert chat["messages"]
+    assert chat["events"]
     assert state["sessions"]
 
 
@@ -214,6 +220,7 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         )
         schedules = _request(host, port, "GET", "/api/schedules")
         sessions = _request(host, port, "GET", "/api/sessions")
+        session_detail = _request(host, port, "GET", "/api/sessions/http-ui")
         messages = _request(host, port, "GET", "/api/sessions/http-ui/messages")
         events = _request(host, port, "GET", "/api/sessions/http-ui/events")
         toggled = _request(
@@ -237,6 +244,7 @@ def test_http_api_application_endpoints(tmp_path: Path) -> None:
         assert state["app"]["name"] == "Kairos"
         assert session["session"]["id"] == "http-ui"
         assert sessions["sessions"]
+        assert session_detail["session"]["id"] == "http-ui"
         assert messages["messages"]
         assert events["events"]
         assert schedules["schedules"]

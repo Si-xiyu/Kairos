@@ -14,15 +14,22 @@ def test_fastapi_health_state_and_chat(tmp_path: Path) -> None:
     bootstrap = client.post("/api/bootstrap", json={})
     chat = client.post("/api/chat", json={"text": "/tool file.list path=.", "session": "fastapi"})
     sessions = client.get("/api/sessions")
+    session = client.get("/api/sessions/fastapi")
     messages = client.get("/api/sessions/fastapi/messages")
+    events = client.get("/api/sessions/fastapi/events")
     state = client.get("/api/state")
 
     assert health.status_code == 200
     assert health.json()["service"] == "kairos"
     assert bootstrap.json()["default_nightly_journal"] == "installed"
     assert "tool file.list: ok" in chat.json()["outbound"][0]["text"]
+    assert chat.json()["session"]["id"] == "fastapi"
+    assert chat.json()["messages"]
+    assert any(event["kind"] == "tool_result" for event in chat.json()["events"])
     assert sessions.json()["sessions"]
+    assert session.json()["session"]["id"] == "fastapi"
     assert messages.json()["messages"]
+    assert events.json()["events"]
     assert state.json()["app"]["name"] == "Kairos"
 
 
