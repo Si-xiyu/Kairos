@@ -3,7 +3,16 @@ import { AgentInspector } from "./components/AgentInspector";
 import { Composer } from "./components/Composer";
 import { MessageStream } from "./components/MessageStream";
 import { SessionSidebar } from "./components/SessionSidebar";
-import { listAgentEvents, listMessages, listSessions } from "./services/agentApi";
+import {
+  API_BASE,
+  bootstrapWorkspace,
+  checkHealth,
+  createSession as createBackendSession,
+  listAgentEvents,
+  listMessages,
+  listSessions,
+  sendChatMessage,
+} from "./services/agentApi";
 import type { AgentEvent, Message, Session } from "./types";
 
 function App() {
@@ -14,20 +23,45 @@ function App() {
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isBooting, setIsBooting] = useState(true);
+  const [backendStatus, setBackendStatus] = useState<"online" | "offline">("offline");
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     async function loadInitialState() {
-      const loadedSessions = await listSessions();
-      const firstSessionId = loadedSessions[0]?.id ?? "";
-      const [loadedMessages, loadedEvents] = await Promise.all([
-        firstSessionId ? listMessages(firstSessionId) : Promise.resolve([]),
-        firstSessionId ? listAgentEvents(firstSessionId) : Promise.resolve([]),
-      ]);
+      setIsBooting(true);
+      try {
+        await checkHealth();
+        await bootstrapWorkspace();
+        setBackendStatus("online");
 
-      setSessions(loadedSessions);
-      setActiveSessionId(firstSessionId);
-      setMessages(loadedMessages);
-      setEvents(loadedEvents);
+        let loadedSessions = await listSessions();
+        if (loadedSessions.length === 0) {
+          const created = await createBackendSession(
+            "default",
+            "Kairos Console",
+            "Start with /tool file.list path=. to exercise the local runtime.",
+          );
+          loadedSessions = [created];
+        }
+
+        const firstSessionId = loadedSessions[0]?.id ?? "";
+        const [loadedMessages, loadedEvents] = await Promise.all([
+          firstSessionId ? listMessages(firstSessionId) : Promise.resolve([]),
+          firstSessionId ? listAgentEvents(firstSessionId) : Promise.resolve([]),
+        ]);
+
+        setSessions(loadedSessions);
+        setActiveSessionId(firstSessionId);
+        setMessages(loadedMessages);
+        setEvents(loadedEvents);
+        setErrorMessage("");
+      } catch (error) {
+        setBackendStatus("offline");
+        setErrorMessage(error instanceof Error ? error.message : "Unable to reach Kairos backend.");
+      } finally {
+        setIsBooting(false);
+      }
     }
 
     loadInitialState();
@@ -63,23 +97,41 @@ function App() {
     ]);
   }
 
-  function createSession() {
-    const id = `session-${Date.now()}`;
-    const session: Session = {
-      id,
-      title: "New local session",
-      summary: "Draft a new Agent task.",
-      updatedAt: "Now",
-      status: "active",
-    };
-    setSessions((current) => [session, ...current]);
-    setActiveSessionId(id);
-    setDraft("");
+  async function refreshSession(sessionId: string) {
+    const [nextSessions, nextMessages, nextEvents] = await Promise.all([
+      listSessions(),
+      listMessages(sessionId),
+      listAgentEvents(sessionId),
+    ]);
+    setSessions(nextSessions);
+    setMessages((current) => [
+      ...current.filter((message) => message.sessionId !== sessionId),
+      ...nextMessages,
+    ]);
+    setEvents((current) => [
+      ...current.filter((event) => event.sessionId !== sessionId),
+      ...nextEvents,
+    ]);
   }
 
-  function sendMessage() {
+  async function createSession() {
+    const id = `session-${Date.now()}`;
+    try {
+      const session = await createBackendSession(id, "New local session", "Draft a new Agent task.");
+      setSessions((current) => [session, ...current]);
+      setMessages((current) => current.filter((message) => message.sessionId !== id));
+      setEvents((current) => current.filter((event) => event.sessionId !== id));
+      setActiveSessionId(id);
+      setDraft("");
+      setErrorMessage("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create a Kairos session.");
+    }
+  }
+
+  async function sendMessage() {
     const content = draft.trim();
-    if (!content) {
+    if (!content || !activeSessionId || isGenerating) {
       return;
     }
 
@@ -92,23 +144,7 @@ function App() {
       blocks: [{ kind: "text", content }],
     };
 
-    const assistantMessage: Message = {
-      id: `msg-${Date.now()}-assistant`,
-      sessionId: activeSessionId,
-      role: "assistant",
-      author: "Kairos",
-      createdAt: "Now",
-      status: "pending",
-      blocks: [
-        {
-          kind: "text",
-          content:
-            "Mock response queued. The future WebSocket client will replace this with streaming assistant deltas.",
-        },
-      ],
-    };
-
-    setMessages((current) => [...current, userMessage, assistantMessage]);
+    setMessages((current) => [...current, userMessage]);
     setSessions((current) =>
       current.map((session) =>
         session.id === activeSessionId
@@ -118,10 +154,39 @@ function App() {
     );
     setDraft("");
     setIsGenerating(true);
+    setErrorMessage("");
+
+    try {
+      await sendChatMessage(activeSessionId, content);
+      await refreshSession(activeSessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Kairos backend did not respond.";
+      setMessages((current) => [
+        ...current,
+        {
+          id: `msg-${Date.now()}-error`,
+          sessionId: activeSessionId,
+          role: "system",
+          author: "Kairos Runtime",
+          createdAt: "Now",
+          status: "complete",
+          blocks: [{ kind: "text", content: message }],
+        },
+      ]);
+      setErrorMessage(message);
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   return (
     <div className="app-shell">
+      <div className={`backend-ribbon backend-${backendStatus}`}>
+        <span>{backendStatus === "online" ? "Backend online" : "Backend offline"}</span>
+        <code>{API_BASE}</code>
+        {isBooting ? <em>Connecting...</em> : null}
+      </div>
+      {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
       <SessionSidebar
         sessions={filteredSessions}
         activeSessionId={activeSessionId}
@@ -140,7 +205,7 @@ function App() {
           onStop={() => setIsGenerating(false)}
         />
       </div>
-      <AgentInspector events={activeEvents} />
+      <AgentInspector events={activeEvents} backendStatus={backendStatus} />
     </div>
   );
 }
