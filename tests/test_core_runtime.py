@@ -4,6 +4,7 @@ from pathlib import Path
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore, parse_agent_command
+from kairos.llm import ModelMessage, ModelReply
 from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
 from kairos.tools import ToolRouter
@@ -84,8 +85,33 @@ def test_agent_loop_records_plain_turn(tmp_path: Path) -> None:
     events = SessionStore(paths).read("plain")
 
     assert result.outbound
-    assert "LLM integration is not wired yet" in result.outbound[0].text
+    assert "本地 MVP 模式" in result.outbound[0].text
+    assert result.observations == ["model local/kairos-local-mvp: ok"]
     assert [event.role for event in events] == ["user", "assistant"]
+
+
+def test_agent_loop_uses_injected_chat_provider(tmp_path: Path) -> None:
+    class FakeProvider:
+        name = "fake"
+        model = "unit"
+
+        def complete(self, system: str, messages: list[ModelMessage]) -> ModelReply:
+            assert "Kairos" in system
+            assert messages[-1].content == "hello model"
+            return ModelReply(text="hello from model", provider=self.name, model=self.model)
+
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    context = RuntimeContext.local(paths, session_id="provider")
+
+    result = AgentLoop(context, chat_provider=FakeProvider()).run_turn(
+        InboundMessage(text="hello model", sender_id="tester")
+    )
+    events = SessionStore(paths).read("provider")
+
+    assert result.outbound[0].text == "hello from model"
+    assert result.observations == ["model fake/unit: ok"]
+    assert events[-1].content == "hello from model"
 
 
 def test_agent_loop_tool_turn_uses_router_and_audit(tmp_path: Path) -> None:

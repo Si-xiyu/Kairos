@@ -122,13 +122,17 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_tick = sub.add_parser("daemon-tick", help="Run one daemon scheduler/delivery tick.")
     daemon_tick.add_argument("--root", default=".")
 
-    chat_once = sub.add_parser("chat-once", help="Run one deterministic AgentLoop turn.")
+    chat_once = sub.add_parser("chat-once", help="Run one AgentLoop turn.")
     chat_once.add_argument("text")
     chat_once.add_argument("--session", default="default")
     chat_once.add_argument("--root", default=".")
     chat_once.add_argument("--autonomy", type=int, default=3)
 
-    sub.add_parser("chat", help="Placeholder for interactive agent chat.")
+    chat = sub.add_parser("chat", help="Start an interactive Kairos chat session.")
+    chat.add_argument("--session", default="default")
+    chat.add_argument("--root", default=".")
+    chat.add_argument("--autonomy", type=int, default=3)
+
     sub.add_parser("daemon", help="Placeholder for long-running Kairos daemon.")
     return parser
 
@@ -416,6 +420,27 @@ def cmd_chat_once(root: str, session: str, text: str, autonomy: int) -> int:
     return 0
 
 
+def cmd_chat(root: str, session: str, autonomy: int) -> int:
+    paths = KairosPaths.from_root(Path(root))
+    ensure_workspace(paths)
+    context = RuntimeContext.local(paths, session_id=session, autonomy_level=AutonomyLevel(autonomy))
+    loop = AgentLoop(context)
+    print("Kairos chat started. Type /help, /tool file.list path=., or /exit.")
+    while True:
+        try:
+            text = input("you > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if text.lower() in {"", "/exit", "exit", "quit", "q"}:
+            return 0
+        result = loop.run_turn(
+            InboundMessage(text=text, sender_id="cli-user", channel="cli", peer_id="cli-user")
+        )
+        for outbound in result.outbound:
+            print(f"kairos > {outbound.text}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -473,7 +498,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_daemon_tick(args.root)
     if args.command == "chat-once":
         return cmd_chat_once(args.root, args.session, args.text, args.autonomy)
-    if args.command in {"chat", "daemon"}:
+    if args.command == "chat":
+        return cmd_chat(args.root, args.session, args.autonomy)
+    if args.command in {"daemon"}:
         print(f"`kairos {args.command}` is reserved by the runtime skeleton.")
         return 0
 

@@ -39,6 +39,8 @@ PYTHONPATH=src python -m kairos.cli doctor
 PYTHONPATH=src python -m kairos.cli tools
 PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
 PYTHONPATH=src python -m kairos.cli chat-once "/tool file.list path=."
+PYTHONPATH=src python -m kairos.cli chat-once "你好，Kairos"
+PYTHONPATH=src python -m kairos.cli chat
 PYTHONPATH=src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量"
 PYTHONPATH=src python -m kairos.cli schedule-add journal "Journal Check" --due-now --message "要写日记吗？"
 PYTHONPATH=src python -m kairos.cli daemon-tick
@@ -79,4 +81,20 @@ The current commander-owned runtime contracts include:
 - permission-gated tool execution via `ToolRouter`,
 - JSONL audit logs via `AuditLogger`,
 - project-root constrained file tools.
-- deterministic `AgentLoop` turns via `chat-once`.
+- `AgentLoop` turns via `chat-once`, `chat`, and `POST /api/chat`.
+
+## Model Provider MVP
+
+Kairos defaults to a local fallback provider so the agent loop can run without secrets or network access.
+
+To connect a real OpenAI-compatible chat API:
+
+```powershell
+$env:KAIROS_LLM_PROVIDER="openai-compatible"
+$env:KAIROS_LLM_BASE_URL="https://api.openai.com/v1"
+$env:KAIROS_LLM_API_KEY="..."
+$env:KAIROS_LLM_MODEL="..."
+python app.py --host 127.0.0.1 --port 8765 --root .
+```
+
+The first loop MVP supports plain conversation through the provider and keeps slash-command tools on the existing permission-gated path. Model-driven tool calls and streaming come next.

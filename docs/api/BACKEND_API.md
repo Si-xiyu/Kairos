@@ -384,7 +384,9 @@ Body:
 }
 ```
 
-Runs one deterministic `AgentLoop` turn. This does not call an LLM yet.
+Runs one `AgentLoop` turn. Plain messages go through the configured chat
+provider; slash commands such as `/tool file.list path=.` still exercise the
+native tool and permission path directly.
 
 The response is optimized for frontend handoff: it keeps the original
 `outbound` and `observations` fields, and also returns the refreshed
@@ -398,6 +400,18 @@ The response is optimized for frontend handoff: it keeps the original
   "messages": [],
   "events": []
 }
+```
+
+Default model mode is local fallback, which is deterministic and does not call
+the network. To connect an OpenAI-compatible chat-completions endpoint, start
+the backend with:
+
+```text
+KAIROS_LLM_PROVIDER=openai-compatible
+KAIROS_LLM_BASE_URL=https://api.openai.com/v1
+KAIROS_LLM_API_KEY=...
+KAIROS_LLM_MODEL=...
+python app.py --root . --host 127.0.0.1 --port 8765
 ```
 
 ## Weekly Review

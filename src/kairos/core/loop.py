@@ -6,6 +6,7 @@ from kairos.core.commands import parse_agent_command
 from kairos.core.context import RuntimeContext
 from kairos.core.prompt import PromptBuilder
 from kairos.core.session import SessionEvent
+from kairos.llm import ChatProvider, ChatProviderError, ModelMessage, provider_from_env
 from kairos.messages import InboundMessage, OutboundMessage
 
 
@@ -16,19 +17,22 @@ class AgentTurnResult:
 
 
 class AgentLoop:
-    """Deterministic runtime loop scaffold.
+    """Single-agent query loop.
 
-    This does not call an LLM yet. It provides the same session/tool/permission
-    path that the future model loop will use.
+    Slash commands still exercise the deterministic tool path. Plain messages
+    now flow through a chat provider so the same API endpoint can host real
+    conversation before model-driven tool calls are added.
     """
 
     def __init__(
         self,
         context: RuntimeContext | None = None,
         prompt_builder: PromptBuilder | None = None,
+        chat_provider: ChatProvider | None = None,
     ) -> None:
         self.context = context
         self.prompt_builder = prompt_builder or PromptBuilder()
+        self.chat_provider = chat_provider or provider_from_env()
 
     def run_turn(self, inbound: InboundMessage) -> AgentTurnResult:
         if self.context is None:
@@ -65,11 +69,20 @@ class AgentLoop:
         else:
             events = self.context.sessions.read(self.context.session_id)
             prompt = self.prompt_builder.build(events)
-            text = (
-                "Kairos runtime is ready. LLM integration is not wired yet.\n"
-                "Try `/tool file.list path=.` to exercise the tool router.\n\n"
-                f"Prompt preview:\n{prompt.preview()}"
-            )
+            try:
+                reply = self.chat_provider.complete(
+                    system=prompt.system,
+                    messages=_model_messages(prompt.recent_messages),
+                )
+                text = reply.text
+                observations.append(f"model {reply.provider}/{reply.model}: ok")
+            except ChatProviderError as exc:
+                text = (
+                    "Kairos 的模型通道暂时没有跑通。\n"
+                    f"错误：{exc}\n\n"
+                    "你仍然可以使用 `/tool file.list path=.` 测试工具和权限管道。"
+                )
+                observations.append(f"model error: {exc}")
 
         self.context.sessions.append(
             self.context.session_id,
@@ -96,3 +109,19 @@ def _help_text() -> str:
             "- /tool file.read path=README.md",
         ]
     )
+
+
+def _model_messages(events: list[SessionEvent]) -> list[ModelMessage]:
+    messages: list[ModelMessage] = []
+    for event in events:
+        if event.role in {"user", "assistant"}:
+            messages.append(ModelMessage(role=event.role, content=event.content))
+        elif event.role == "tool":
+            tool_name = event.metadata.get("tool", "tool")
+            messages.append(
+                ModelMessage(
+                    role="user",
+                    content=f"Tool result from {tool_name}:\n{event.content}",
+                )
+            )
+    return messages
