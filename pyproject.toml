@@ -18,8 +18,8 @@ kairos = "kairos.cli:main"
 kairos-app = "kairos.app:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["backend/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["backend/src"]

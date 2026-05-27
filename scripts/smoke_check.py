@@ -6,7 +6,7 @@ import sys
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "backend" / "src"))
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.messages import InboundMessage

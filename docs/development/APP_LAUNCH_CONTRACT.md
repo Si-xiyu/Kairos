@@ -26,7 +26,7 @@ http://127.0.0.1:8765
 Run the frontend:
 
 ```powershell
-cd E:\Code\Kairos-frontend\frontend
+cd E:\Code\Kairos\frontend
 npm install
 npm run dev
 ```
@@ -131,7 +131,7 @@ The preferred first packaging path is option 1 because FastAPI already owns stat
 Python backend:
 
 ```text
-PyInstaller bundles `python app.py` and the `kairos` package.
+PyInstaller bundles `backend/app.py` and the `kairos` package from `backend/src`.
 ```
 
 Electron app:
@@ -148,12 +148,18 @@ Startup sequence:
 4. Electron loads `http://127.0.0.1:{port}`.
 5. On app exit, Electron stops the backend process.
 
-## Current Blockers
+## Repository Layout
 
-As of 2026-05-16, `E:\Code\Kairos-frontend` still needs frontend-side sync:
+Frontend and backend now live as sibling app directories:
 
-- add missing `frontend/src/styles.css`
-- replace mock API service with real backend calls
-- update stale tests that expect `frontend/styles.css` and `frontend/app.js`
+```text
+backend/
+  app.py
+  src/kairos/
+frontend/
+  src/
+```
+
+The repository root `app.py` remains as a compatibility wrapper for local use.
 
 Backend can continue implementing agent, memory, and presence stages while frontend catches up.

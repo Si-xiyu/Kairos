@@ -18,15 +18,19 @@ Read [TECHNICAL_REQUIREMENTS.md](TECHNICAL_REQUIREMENTS.md) before implementing 
 This repository currently contains the shared runtime contracts and directory layout for parallel implementation.
 
 ```text
-src/kairos/
-  core/          agent loop contracts
-  tools/         tool registry and routing
-  permissions/   autonomy and risk decisions
-  memory/        personal memory storage
-  lifelog/       journal and review generation
-  presence/      heartbeat and cron
-  channels/      CLI / notification channels
-  delivery/      reliable outbound queue
+backend/
+  app.py          backend application entrypoint
+  src/kairos/
+    core/         agent loop contracts
+    tools/        tool registry and routing
+    permissions/  autonomy and risk decisions
+    memory/       personal memory storage
+    lifelog/      journal and review generation
+    presence/     heartbeat and cron
+    channels/     CLI / notification channels
+    delivery/     reliable outbound queue
+frontend/
+  src/            React/Vite UI
 ```
 
 ## Smoke Check
@@ -34,19 +38,19 @@ src/kairos/
 ```text
 python scripts/smoke_check.py
 python app.py --root . --host 127.0.0.1 --port 8765
-PYTHONPATH=src python -m kairos.cli bootstrap
-PYTHONPATH=src python -m kairos.cli doctor
-PYTHONPATH=src python -m kairos.cli tools
-PYTHONPATH=src python -m kairos.cli run-tool file.list --arg path=.
-PYTHONPATH=src python -m kairos.cli chat-once "/tool file.list path=."
-PYTHONPATH=src python -m kairos.cli chat-once "你好，Kairos"
-PYTHONPATH=src python -m kairos.cli chat
-PYTHONPATH=src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量"
-PYTHONPATH=src python -m kairos.cli schedule-add journal "Journal Check" --due-now --message "要写日记吗？"
-PYTHONPATH=src python -m kairos.cli daemon-tick
+PYTHONPATH=backend/src python -m kairos.cli bootstrap
+PYTHONPATH=backend/src python -m kairos.cli doctor
+PYTHONPATH=backend/src python -m kairos.cli tools
+PYTHONPATH=backend/src python -m kairos.cli run-tool file.list --arg path=.
+PYTHONPATH=backend/src python -m kairos.cli chat-once "/tool file.list path=."
+PYTHONPATH=backend/src python -m kairos.cli chat-once "你好，Kairos"
+PYTHONPATH=backend/src python -m kairos.cli chat
+PYTHONPATH=backend/src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量"
+PYTHONPATH=backend/src python -m kairos.cli schedule-add journal "Journal Check" --due-now --message "要写日记吗？"
+PYTHONPATH=backend/src python -m kairos.cli daemon-tick
 ```
 
-For direct module execution before installing the package, set `PYTHONPATH=src`.
+For direct module execution before installing the package, set `PYTHONPATH=backend/src`.
 
 ## Backend App
 
@@ -63,6 +67,8 @@ http://127.0.0.1:8765
 ```
 
 The app entrypoint runs FastAPI through Uvicorn. The lower-level service logic stays in `KairosBackend`, so tests can exercise the agent runtime without depending on HTTP transport details.
+
+`app.py` at the repository root is a compatibility wrapper. The backend-owned entrypoint lives at `backend/app.py`, so `python backend/app.py --root .` also works from the repository root.
 
 Frontend agents should use [docs/api/BACKEND_API.md](docs/api/BACKEND_API.md).
 

@@ -8,6 +8,7 @@ root `SKILL.md` as the surface treatment.
 ## Run
 
 ```powershell
+cd E:\Code\Kairos\frontend
 npm install
 npm run dev
 ```
@@ -44,6 +45,6 @@ Implemented calls:
 - `POST /api/sessions` for new session records.
 - `GET /api/sessions/{id}/messages` for persisted message history.
 - `GET /api/sessions/{id}/events` for inspector events.
-- `POST /api/chat` for deterministic local agent turns.
+- `POST /api/chat` for local agent turns.
 
 Future WebSocket work should keep the UI state shape in `src/types.ts` stable where possible. The Agent Inspector expects normalized `AgentEvent` records rather than raw log lines.

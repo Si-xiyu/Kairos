@@ -49,11 +49,11 @@ kairos doctor
 The first round is complete when these commands work on a temporary root:
 
 ```text
-PYTHONPATH=src python -m kairos.cli bootstrap --root <tmp>
-PYTHONPATH=src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量" --root <tmp>
-PYTHONPATH=src python -m kairos.cli schedule-add demo "Demo Reminder" --due-now --message "要写日记吗？" --root <tmp>
-PYTHONPATH=src python -m kairos.cli daemon-tick --root <tmp>
-PYTHONPATH=src python -m kairos.cli doctor --root <tmp>
+PYTHONPATH=backend/src python -m kairos.cli bootstrap --root <tmp>
+PYTHONPATH=backend/src python -m kairos.cli reflect "我喜欢先讨论架构，今天很有能量" --root <tmp>
+PYTHONPATH=backend/src python -m kairos.cli schedule-add demo "Demo Reminder" --due-now --message "要写日记吗？" --root <tmp>
+PYTHONPATH=backend/src python -m kairos.cli daemon-tick --root <tmp>
+PYTHONPATH=backend/src python -m kairos.cli doctor --root <tmp>
 ```
 
 And the repository passes:

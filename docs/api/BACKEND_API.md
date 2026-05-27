@@ -6,6 +6,13 @@ Start the backend from the repository root:
 python app.py --root . --host 127.0.0.1 --port 8765
 ```
 
+The repository root `app.py` is a compatibility wrapper. The backend-owned
+entrypoint is:
+
+```text
+python backend/app.py --root . --host 127.0.0.1 --port 8765
+```
+
 The backend runs FastAPI through Uvicorn. It returns JSON and enables permissive CORS for local frontend development.
 
 Base URL:

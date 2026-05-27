@@ -14,6 +14,16 @@ The agreed implementation path is:
 
 The current stdlib HTTP backend remains useful as a contract prototype, but it should not become the long-term web framework. The next backend architecture stage is to migrate the existing API surface to FastAPI while preserving route compatibility.
 
+Current app layout:
+
+```text
+backend/
+  app.py
+  src/kairos/
+frontend/
+  src/
+```
+
 ## Round 1: Application Backend Surface
 
 Goal: make `python app.py` a stable backend surface for the frontend.
