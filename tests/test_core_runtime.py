@@ -4,7 +4,9 @@ from pathlib import Path
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore, parse_agent_command
-from kairos.llm import ModelMessage, ModelReply
+from kairos.core.context_window import ContextPolicy, ContextWindow
+from kairos.llm import ModelMessage, ModelReply, ModelTool, ModelToolCall
+from kairos.memory import MemoryStore
 from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
 from kairos.tools import ToolRouter
@@ -85,7 +87,7 @@ def test_agent_loop_records_plain_turn(tmp_path: Path) -> None:
     events = SessionStore(paths).read("plain")
 
     assert result.outbound
-    assert "本地 MVP 模式" in result.outbound[0].text
+    assert "KAIROS_LLM_PROVIDER" in result.outbound[0].text
     assert result.observations == ["model local/kairos-local-mvp: ok"]
     assert [event.role for event in events] == ["user", "assistant"]
 
@@ -95,7 +97,12 @@ def test_agent_loop_uses_injected_chat_provider(tmp_path: Path) -> None:
         name = "fake"
         model = "unit"
 
-        def complete(self, system: str, messages: list[ModelMessage]) -> ModelReply:
+        def complete(
+            self,
+            system: str,
+            messages: list[ModelMessage],
+            tools: list[ModelTool] | None = None,
+        ) -> ModelReply:
             assert "Kairos" in system
             assert messages[-1].content == "hello model"
             return ModelReply(text="hello from model", provider=self.name, model=self.model)
@@ -112,6 +119,109 @@ def test_agent_loop_uses_injected_chat_provider(tmp_path: Path) -> None:
     assert result.outbound[0].text == "hello from model"
     assert result.observations == ["model fake/unit: ok"]
     assert events[-1].content == "hello from model"
+
+
+def test_agent_loop_model_tool_call_round_trips_through_router(tmp_path: Path) -> None:
+    class ToolCallingProvider:
+        name = "fake"
+        model = "tool-unit"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete(
+            self,
+            system: str,
+            messages: list[ModelMessage],
+            tools: list[ModelTool] | None = None,
+        ) -> ModelReply:
+            self.calls += 1
+            if self.calls == 1:
+                assert tools and any(tool.name == "file__read" for tool in tools)
+                return ModelReply(
+                    text="",
+                    provider=self.name,
+                    model=self.model,
+                    tool_calls=(
+                        ModelToolCall(
+                            id="call_1",
+                            name="file__read",
+                            arguments={"path": "note.txt"},
+                        ),
+                    ),
+                )
+            assert any(message.role == "tool" and "hello" in message.content for message in messages)
+            return ModelReply(text="The file says hello.", provider=self.name, model=self.model)
+
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    context = RuntimeContext.local(paths, session_id="model-tool")
+    provider = ToolCallingProvider()
+
+    result = AgentLoop(context, chat_provider=provider).run_turn(
+        InboundMessage(text="read note.txt", sender_id="tester")
+    )
+    events = SessionStore(paths).read("model-tool")
+
+    assert result.outbound[0].text == "The file says hello."
+    assert provider.calls == 2
+    assert [event.role for event in events] == ["user", "assistant", "tool", "assistant"]
+    assert events[1].metadata["tool_calls"][0]["name"] == "file__read"
+    assert events[2].metadata["tool"] == "file.read"
+    assert events[2].metadata["tool_call_id"] == "call_1"
+    assert (paths.audit / "tool-calls.jsonl").exists()
+
+
+def test_context_window_replaces_large_tool_results_and_summarizes(tmp_path: Path) -> None:
+    class SummaryProvider:
+        name = "fake"
+        model = "summary"
+
+        def complete(
+            self,
+            system: str,
+            messages: list[ModelMessage],
+            tools: list[ModelTool] | None = None,
+        ) -> ModelReply:
+            assert "Summarize" in system
+            return ModelReply(text="Compressed context summary.", provider=self.name, model=self.model)
+
+    events = [
+        SessionEvent(role="user", content="start"),
+        SessionEvent(
+            role="tool",
+            content="x" * 200,
+            metadata={"tool": "file.read", "status": "ok", "tool_call_id": "call_1"},
+        ),
+        SessionEvent(role="assistant", content="middle" * 80),
+        SessionEvent(role="user", content="latest"),
+    ]
+    window = ContextWindow(
+        ContextPolicy(tool_placeholder_after_chars=20, summarize_after_chars=120, preserve_recent_messages=1)
+    )
+
+    result = window.build("system", events, SummaryProvider())
+
+    assert result.summary == "Compressed context summary."
+    assert result.messages[0].content.startswith("Earlier context summary")
+    assert any("level1" in observation for observation in result.observations)
+    assert any("level2" in observation for observation in result.observations)
+
+
+def test_agent_loop_saves_memory_candidate_from_valuable_user_text(tmp_path: Path) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    context = RuntimeContext.local(paths, session_id="memory")
+
+    result = AgentLoop(context).run_turn(
+        InboundMessage(text="Please remember: I prefer architecture before implementation.", sender_id="tester")
+    )
+    memories = MemoryStore(paths).list(include_candidates=True)
+
+    assert any(observation.startswith("memory candidate:") for observation in result.observations)
+    assert memories
+    assert memories[0].source == "session/memory"
 
 
 def test_agent_loop_tool_turn_uses_router_and_audit(tmp_path: Path) -> None:

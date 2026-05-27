@@ -97,4 +97,10 @@ $env:KAIROS_LLM_MODEL="..."
 python app.py --host 127.0.0.1 --port 8765 --root .
 ```
 
-The first loop MVP supports plain conversation through the provider and keeps slash-command tools on the existing permission-gated path. Model-driven tool calls and streaming come next.
+The loop now supports plain conversation, OpenAI-compatible model tool calls, and slash-command tools through the existing permission-gated path. Streaming comes next.
+
+Context handling has an MVP three-layer strategy:
+
+- large tool results are represented to the model as placeholders while the full result stays in the session log,
+- old context can be summarized through the configured model provider,
+- durable user facts/preferences and compression summaries are saved as memory candidates for later review.

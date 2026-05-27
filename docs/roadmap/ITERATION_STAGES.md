@@ -121,7 +121,9 @@ Stages:
    - provider abstraction
    - model config
    - non-streaming chat first
-   - status: MVP started on `dev/agent-loop-mvp`
+   - model tool-call round trip through the permission router
+   - three-layer context compression MVP
+   - status: MVP in progress on `dev/agent-loop-mvp`
 
 2. **R4-S2 Streaming Chat and Events**
    - stream assistant deltas

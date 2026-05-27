@@ -388,6 +388,22 @@ Runs one `AgentLoop` turn. Plain messages go through the configured chat
 provider; slash commands such as `/tool file.list path=.` still exercise the
 native tool and permission path directly.
 
+When the configured model provider returns OpenAI-compatible tool calls, Kairos
+executes them through the existing permission-gated `ToolRouter`, writes the
+tool result back into the JSONL session, then calls the model again for the
+final response. Model-visible tool names use OpenAI-safe names such as
+`file__read`; Kairos maps them back to internal names such as `file.read`.
+
+Context handling currently has three MVP layers:
+
+- Level 1: large tool results are replaced with compact placeholders before
+  they are sent back to the model.
+- Level 2: when the model-visible context grows past the local threshold,
+  Kairos asks the provider to summarize older messages and inserts that summary
+  ahead of recent messages.
+- Save layer: user-stated durable facts/preferences and generated context
+  summaries are saved as memory candidates under `.kairos/memory/candidates/`.
+
 The response is optimized for frontend handoff: it keeps the original
 `outbound` and `observations` fields, and also returns the refreshed
 `session`, `messages`, and Inspector `events` for the target session.

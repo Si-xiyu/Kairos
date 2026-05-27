@@ -12,6 +12,23 @@ from urllib.error import HTTPError, URLError
 class ModelMessage:
     role: str
     content: str
+    tool_call_id: str | None = None
+    name: str | None = None
+    tool_calls: tuple["ModelToolCall", ...] = ()
+
+
+@dataclass(frozen=True)
+class ModelTool:
+    name: str
+    description: str
+    input_schema: dict[str, object]
+
+
+@dataclass(frozen=True)
+class ModelToolCall:
+    id: str
+    name: str
+    arguments: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -19,13 +36,19 @@ class ModelReply:
     text: str
     provider: str
     model: str
+    tool_calls: tuple[ModelToolCall, ...] = ()
 
 
 class ChatProvider(Protocol):
     name: str
     model: str
 
-    def complete(self, system: str, messages: list[ModelMessage]) -> ModelReply:
+    def complete(
+        self,
+        system: str,
+        messages: list[ModelMessage],
+        tools: list[ModelTool] | None = None,
+    ) -> ModelReply:
         ...
 
 
@@ -37,7 +60,12 @@ class LocalCompanionProvider:
     name = "local"
     model = "kairos-local-mvp"
 
-    def complete(self, system: str, messages: list[ModelMessage]) -> ModelReply:
+    def complete(
+        self,
+        system: str,
+        messages: list[ModelMessage],
+        tools: list[ModelTool] | None = None,
+    ) -> ModelReply:
         last_user = next((message.content for message in reversed(messages) if message.role == "user"), "")
         if not last_user.strip():
             text = "我在。你可以直接和我说接下来要推进什么。"
@@ -65,18 +93,32 @@ class OpenAICompatibleProvider:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
 
-    def complete(self, system: str, messages: list[ModelMessage]) -> ModelReply:
+    def complete(
+        self,
+        system: str,
+        messages: list[ModelMessage],
+        tools: list[ModelTool] | None = None,
+    ) -> ModelReply:
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
-                *[
-                    {"role": message.role, "content": message.content}
-                    for message in messages
-                    if message.content.strip()
-                ],
+                *[_message_to_openai(message) for message in messages],
             ],
         }
+        if tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema,
+                    },
+                }
+                for tool in tools
+            ]
+            payload["tool_choice"] = "auto"
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -101,10 +143,15 @@ class OpenAICompatibleProvider:
 
         parsed = json.loads(raw)
         try:
-            text = parsed["choices"][0]["message"]["content"]
+            message = parsed["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ChatProviderError(f"unexpected model provider response: {raw[:500]}") from exc
-        return ModelReply(text=str(text), provider=self.name, model=self.model)
+        return ModelReply(
+            text=str(message.get("content") or ""),
+            provider=self.name,
+            model=self.model,
+            tool_calls=tuple(_parse_openai_tool_calls(message.get("tool_calls") or [])),
+        )
 
 
 def provider_from_env(environ: Mapping[str, str] | None = None) -> ChatProvider:
@@ -124,3 +171,49 @@ def provider_from_env(environ: Mapping[str, str] | None = None) -> ChatProvider:
             timeout_seconds=int(environ.get("KAIROS_LLM_TIMEOUT", "60")),
         )
     raise ChatProviderError(f"unsupported KAIROS_LLM_PROVIDER: {provider}")
+
+
+def _message_to_openai(message: ModelMessage) -> dict[str, object]:
+    if message.role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": message.tool_call_id or message.name or "tool_call",
+            "content": message.content,
+        }
+    payload: dict[str, object] = {"role": message.role, "content": message.content}
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                },
+            }
+            for call in message.tool_calls
+        ]
+    return payload
+
+
+def _parse_openai_tool_calls(raw_calls: list[object]) -> list[ModelToolCall]:
+    calls: list[ModelToolCall] = []
+    for raw in raw_calls:
+        if not isinstance(raw, dict):
+            continue
+        function = raw.get("function") if isinstance(raw.get("function"), dict) else {}
+        raw_arguments = function.get("arguments", "{}")
+        try:
+            arguments = json.loads(str(raw_arguments or "{}"))
+        except json.JSONDecodeError:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        calls.append(
+            ModelToolCall(
+                id=str(raw.get("id") or f"tool_call_{len(calls) + 1}"),
+                name=str(function.get("name") or raw.get("name") or ""),
+                arguments=arguments,
+            )
+        )
+    return [call for call in calls if call.name]
