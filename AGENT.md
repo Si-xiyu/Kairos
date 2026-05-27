@@ -1,6 +1,14 @@
-# CLAUDE.md
+# AGENT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding assistant(claude code / codex) when working with code in this repository.
+
+## **工作操作规范**
+
+1. 在行动之前先列出计划清单，涉及预期修改内容、影响范围。在完成修改后总结修改内容、影响范围，以及人工测试的方法。
+
+2. 把单次完成的任务拆分为多个阶段，在每个阶段都进行一次commit。
+
+3. git的commit要求格式为 “一句话总结 + 空行 + 正文” ，在一句话总结中尽量简洁干练，而在正文中需要较为详尽地说明改动范围，实现功能，工作总结等。
 
 ## Quick Start Commands
 
@@ -108,19 +116,6 @@ Memories have types: `user`, `feedback`, `project`, `reference`, `life_pattern`,
 Two workflows:
 1. **Direct save**: `kairos memory-save <name> <description> <content>`
 2. **Candidate flow**: `/api/reflect` extracts candidates → review → `/api/memories/confirm`
-
-### Lifelog
-
-Daily journals under `.kairos/journal/YYYY/MM/YYYY-MM-DD.md` with sections:
-- 今天发生了什么
-- 我在想什么
-- 做了哪些事情
-- 情绪与能量
-- 有价值的对话
-- Kairos 的观察
-- 明天可以推进的事
-
-Weekly review generates from recent daily journals via `/api/reviews/weekly`.
 
 ### Current Limitations
 
