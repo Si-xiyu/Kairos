@@ -42,6 +42,64 @@ def test_tool_router_allows_low_risk_and_audits(tmp_path: Path) -> None:
     assert (paths.audit / "tool-calls.jsonl").exists()
 
 
+def test_advanced_tools_search_memory_and_environment_context(tmp_path: Path, monkeypatch) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    fixture = tmp_path / "search-fixture.json"
+    fixture.write_text(
+        """
+        {
+          "results": [
+            {"title": "Lunch noodles", "url": "https://example.test/noodles", "snippet": "warm lunch near office"},
+            {"title": "Unrelated", "url": "https://example.test/other", "snippet": "nothing"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KAIROS_WEB_SEARCH_FIXTURE", "search-fixture.json")
+    monkeypatch.setenv("KAIROS_LOCATION_NAME", "Shanghai")
+    monkeypatch.setenv("KAIROS_WEATHER_SUMMARY", "light rain")
+    monkeypatch.setenv("KAIROS_WEATHER_TEMPERATURE_C", "22")
+    registry = build_native_registry(paths)
+    router = ToolRouter(
+        registry,
+        PermissionManager(AutonomyLevel.LOW_RISK_AUTO),
+        AuditLogger(paths),
+    )
+
+    saved = router.call(
+        "memory.save_candidate",
+        {
+            "name": "prefers_warm_lunch",
+            "description": "User prefers warm lunch on rainy days.",
+            "content": "When it rains, suggest warm soup or noodles.",
+            "type": "user",
+            "reason": "lunch preference",
+        },
+    )
+    memory = router.call("memory.search", {"query": "warm lunch", "include_candidates": True})
+    search = router.call("web.search", {"query": "lunch", "limit": 3})
+    location = router.call("location.current")
+    weather = router.call("weather.current")
+
+    assert {spec.name for spec in registry.list()} >= {
+        "web.search",
+        "weather.current",
+        "location.current",
+        "memory.search",
+        "memory.save_candidate",
+    }
+    assert saved.status == "ok"
+    assert memory.status == "ok"
+    assert memory.data["matches"][0]["name"] == "prefers_warm_lunch"
+    assert search.data["configured"] is True
+    assert search.data["results"][0]["title"] == "Lunch noodles"
+    assert location.data["name"] == "Shanghai"
+    assert weather.data["summary"] == "light rain"
+    assert len((paths.audit / "tool-calls.jsonl").read_text(encoding="utf-8").splitlines()) >= 10
+
+
 def test_tool_router_blocks_medium_without_approval(tmp_path: Path) -> None:
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)

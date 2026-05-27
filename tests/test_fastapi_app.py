@@ -67,6 +67,18 @@ def test_fastapi_journal_memory_schedule_workflow(tmp_path: Path) -> None:
     assert any(job["id"] == "fastapi-reminder" for job in schedules.json()["schedules"])
 
 
+def test_fastapi_heartbeat_tick_exposes_presence_session(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path))
+
+    heartbeat = client.post("/api/heartbeat/tick", json={"force": True, "channel": "cli"})
+    events = client.get("/api/sessions/kairos-presence/events")
+
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["heartbeat"]["message"]
+    assert heartbeat.json()["session"]["id"] == "kairos-presence"
+    assert events.json()["events"]
+
+
 def test_fastapi_static_hosting(tmp_path: Path) -> None:
     public = tmp_path / "public"
     public.mkdir()

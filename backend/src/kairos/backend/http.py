@@ -178,6 +178,16 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 )
             elif route == "/api/daemon/tick":
                 self._send_json(self.server.backend.daemon_tick())
+            elif route == "/api/heartbeat/tick":
+                self._send_json(
+                    self.server.backend.heartbeat_tick(
+                        force=bool(body.get("force", False)),
+                        user_active=bool(body.get("user_active", False)),
+                        do_not_disturb=bool(body.get("do_not_disturb", False)),
+                        channel=str(body.get("channel", "windows_toast")),
+                        to=str(body.get("to", "local-user")),
+                    )
+                )
             elif route == "/api/chat":
                 self._send_json(
                     self.server.backend.chat_once(

@@ -188,6 +188,17 @@ def create_app(root: Path) -> FastAPI:
     def daemon_tick() -> dict[str, Any]:
         return _backend(app).daemon_tick()
 
+    @app.post("/api/heartbeat/tick")
+    def heartbeat_tick(body: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = body or {}
+        return _backend(app).heartbeat_tick(
+            force=bool(body.get("force", False)),
+            user_active=bool(body.get("user_active", False)),
+            do_not_disturb=bool(body.get("do_not_disturb", False)),
+            channel=str(body.get("channel", "windows_toast")),
+            to=str(body.get("to", "local-user")),
+        )
+
     @app.post("/api/chat")
     def chat(body: dict[str, Any]) -> dict[str, Any]:
         return _backend(app).chat_once(

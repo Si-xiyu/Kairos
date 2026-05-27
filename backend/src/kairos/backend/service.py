@@ -5,12 +5,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from kairos.channels import ChannelManager, CLIChannel
+from kairos.channels import ChannelManager, CLIChannel, WindowsToastChannel
 from kairos.capabilities import SkillRegistry, list_capabilities
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext
 from kairos.core.session import SessionEvent, SessionStore
-from kairos.delivery import DeliveryQueue
+from kairos.delivery import DeliveryQueue, DeliveryRunner
 from kairos.lifelog import (
     DailyJournalStore,
     JournalDraftBuilder,
@@ -22,7 +22,14 @@ from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
 from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 from kairos.messages import InboundMessage, OutboundMessage
 from kairos.permissions import AutonomyLevel
-from kairos.presence import DaemonRuntime, PresenceEvent, ScheduleStore, ScheduledJob
+from kairos.presence import (
+    DaemonRuntime,
+    HeartbeatRunner,
+    PRESENCE_SESSION_ID,
+    PresenceEvent,
+    ScheduleStore,
+    ScheduledJob,
+)
 
 
 class KairosBackend:
@@ -98,6 +105,10 @@ class KairosBackend:
             "delivery": {
                 "pending": _count_files(self.paths.delivery_pending, "*.json"),
                 "failed": _count_files(self.paths.delivery_failed, "*.json"),
+            },
+            "presence": {
+                "session_id": PRESENCE_SESSION_ID,
+                "events": len(self.list_session_events(PRESENCE_SESSION_ID)["events"]),
             },
             "capabilities": {
                 "tools": len(capabilities["tools"]),
@@ -367,8 +378,8 @@ class KairosBackend:
         runtime = DaemonRuntime(
             schedule_store=ScheduleStore(self.paths),
             delivery_queue=DeliveryQueue(self.paths),
-            channel_manager=ChannelManager([CaptureCLIChannel()]),
-            presence_handler=_presence_handler,
+            channel_manager=ChannelManager([CaptureCLIChannel(), WindowsToastChannel()]),
+            presence_handler=lambda event, now: _presence_handler(event, now, self.paths),
         )
         result = runtime.tick()
         return {
@@ -377,6 +388,49 @@ class KairosBackend:
             "failed_jobs": result.failed_jobs,
             "delivery": result.delivery,
             "delivered": delivered,
+        }
+
+    def heartbeat_tick(
+        self,
+        force: bool = False,
+        user_active: bool = False,
+        do_not_disturb: bool = False,
+        channel: str = "windows_toast",
+        to: str = "local-user",
+    ) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        delivered: list[dict[str, str]] = []
+
+        class CaptureCLIChannel(CLIChannel):
+            def send(self, to: str, text: str, **kwargs: object) -> bool:
+                delivered.append({"channel": self.name, "to": to, "text": text})
+                return super().send(to=to, text=text, **kwargs)
+
+        class CaptureWindowsToastChannel(WindowsToastChannel):
+            def send(self, to: str, text: str, **kwargs: object) -> bool:
+                delivered.append({"channel": self.name, "to": to, "text": text})
+                return super().send(to=to, text=text, **kwargs)
+
+        run = HeartbeatRunner(self.paths).run(
+            force=force,
+            user_active=user_active,
+            do_not_disturb=do_not_disturb,
+        )
+        queue = DeliveryQueue(self.paths)
+        enqueued = 0
+        if run.should_notify:
+            queue.enqueue(channel=channel, to=to, text=run.message)
+            enqueued = 1
+        delivery = DeliveryRunner(
+            queue,
+            ChannelManager([CaptureCLIChannel(), CaptureWindowsToastChannel()]).send,
+        ).process_once()
+        return {
+            "heartbeat": run.to_json(),
+            "enqueued": enqueued,
+            "delivery": delivery,
+            "delivered": delivered,
+            **self._session_payload(PRESENCE_SESSION_ID),
         }
 
     def chat_once(self, text: str, session: str = "default", autonomy: int = 3) -> dict[str, Any]:
@@ -518,7 +572,23 @@ class KairosBackend:
         }
 
 
-def _presence_handler(event: PresenceEvent, now: datetime):
+def _presence_handler(event: PresenceEvent, now: datetime, paths: KairosPaths):
+    if event.event == "heartbeat":
+        run = HeartbeatRunner(paths).run(
+            now=now,
+            user_active=bool(event.payload.get("user_active", False)),
+            do_not_disturb=bool(event.payload.get("do_not_disturb", False)),
+            force=bool(event.payload.get("force", True)),
+        )
+        if not run.should_notify:
+            return []
+        return [
+            OutboundMessage(
+                channel=str(event.payload.get("channel", "windows_toast")),
+                to=str(event.payload.get("to", "local-user")),
+                text=run.message,
+            )
+        ]
     message = event.payload.get("message") or _default_presence_message(event)
     if not message:
         return []

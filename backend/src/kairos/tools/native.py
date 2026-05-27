@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from kairos.config import KairosPaths
+from kairos.tools.advanced import build_advanced_tools
 from kairos.tools.registry import ToolRegistry, ToolResult, ToolSpec
 
 
@@ -48,6 +49,8 @@ def build_native_registry(paths: KairosPaths) -> ToolRegistry:
             handler=lambda path=".": _list_files(paths, path),
         )
     )
+    for spec in build_advanced_tools(paths):
+        registry.register(spec)
     return registry
 
 
