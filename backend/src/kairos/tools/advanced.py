@@ -124,6 +124,28 @@ def build_advanced_tools(paths: KairosPaths) -> list[ToolSpec]:
                 paths, name, description, content, type, confidence, reason
             ),
         ),
+        ToolSpec(
+            name="meal.recommend",
+            description=(
+                "Recommend what the user should eat for a meal by combining configured "
+                "location, weather, and confirmed preference memories. Use this for "
+                "questions like 'what should I eat for lunch today?'."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "meal_time": {"type": "string", "default": "lunch"},
+                    "location": {"type": "string"},
+                    "budget": {"type": "string"},
+                    "include_candidates": {"type": "boolean"},
+                },
+            },
+            risk_level="low",
+            source="native",
+            handler=lambda meal_time="lunch", location="", budget="", include_candidates=False: _meal_recommend(
+                paths, meal_time, location, budget, include_candidates
+            ),
+        ),
     ]
 
 
@@ -249,6 +271,139 @@ def _save_memory_candidate(
         f"Saved memory candidate: {entry.name}",
         {"memory": entry.name, "candidate": True, "path": str(path)},
     )
+
+
+def _meal_recommend(
+    paths: KairosPaths,
+    meal_time: str = "lunch",
+    location: str = "",
+    budget: str = "",
+    include_candidates: bool = False,
+) -> ToolResult:
+    location_result = _current_location()
+    weather_result = _current_weather(location or str(location_result.data.get("name") or ""))
+    preferences = _food_preferences(paths, include_candidates=_truthy(include_candidates))
+    weather = weather_result.data
+    recommendation = _choose_meal(weather, preferences)
+    rationale = _meal_rationale(weather, preferences, budget)
+    configured = {
+        "location": bool(location_result.data.get("configured") or location),
+        "weather": bool(weather_result.data.get("configured")),
+        "memory": bool(preferences),
+    }
+    data = {
+        "meal_time": meal_time or "lunch",
+        "location": location or location_result.data.get("name"),
+        "budget": budget or None,
+        "weather": weather,
+        "preferences": preferences,
+        "recommendation": recommendation,
+        "alternatives": _meal_alternatives(recommendation, weather),
+        "rationale": rationale,
+        "configured": configured,
+    }
+    preview = (
+        f"Recommend {recommendation['primary']} for {data['meal_time']}. "
+        f"Reason: {'; '.join(rationale)}"
+    )
+    return ToolResult("ok", preview, data)
+
+
+def _food_preferences(paths: KairosPaths, include_candidates: bool = False) -> list[dict[str, Any]]:
+    if not paths.memory.exists():
+        return []
+    keywords = {
+        "food",
+        "meal",
+        "lunch",
+        "dinner",
+        "breakfast",
+        "eat",
+        "noodle",
+        "rice",
+        "soup",
+        "spicy",
+        "vegetarian",
+        "coffee",
+        "restaurant",
+    }
+    matches: list[dict[str, Any]] = []
+    for entry, _path, candidate in MemoryStore(paths).list_with_paths(
+        include_candidates=include_candidates
+    ):
+        text = " ".join([entry.name, entry.description, entry.content]).lower()
+        if not any(keyword in text for keyword in keywords):
+            continue
+        matches.append(
+            {
+                "name": entry.name,
+                "description": entry.description,
+                "content": entry.content,
+                "candidate": candidate,
+            }
+        )
+    return matches[:5]
+
+
+def _choose_meal(
+    weather: dict[str, Any],
+    preferences: list[dict[str, Any]],
+) -> dict[str, str]:
+    text = " ".join(
+        [
+            str(weather.get("summary") or ""),
+            str(weather.get("condition") or ""),
+            *[str(item.get("content") or "") for item in preferences],
+            *[str(item.get("description") or "") for item in preferences],
+        ]
+    ).lower()
+    temperature = weather.get("temperature_c")
+    if "vegetarian" in text:
+        return {"primary": "a warm vegetarian rice bowl", "style": "vegetarian"}
+    if "spicy" in text:
+        return {"primary": "spicy noodles with a light side", "style": "spicy"}
+    if "rain" in text or "cold" in text or (isinstance(temperature, float) and temperature <= 12):
+        return {"primary": "hot soup noodles", "style": "warm"}
+    if "hot" in text or (isinstance(temperature, float) and temperature >= 28):
+        return {"primary": "cold noodles or a light rice bowl", "style": "light"}
+    if "rice" in text:
+        return {"primary": "a balanced rice bowl", "style": "balanced"}
+    return {"primary": "a warm noodle bowl with vegetables and protein", "style": "balanced"}
+
+
+def _meal_alternatives(recommendation: dict[str, str], weather: dict[str, Any]) -> list[str]:
+    style = recommendation.get("style")
+    if style == "spicy":
+        return ["mala tang with vegetables", "spicy beef noodles"]
+    if style == "vegetarian":
+        return ["vegetarian curry rice", "mushroom noodle soup"]
+    if style == "light":
+        return ["cold soba", "chicken salad rice bowl"]
+    if style == "warm":
+        return ["wonton soup", "tomato beef noodles"]
+    if weather.get("configured"):
+        return ["rice bowl", "noodle soup"]
+    return ["rice bowl", "noodle soup", "nearby set lunch"]
+
+
+def _meal_rationale(
+    weather: dict[str, Any],
+    preferences: list[dict[str, Any]],
+    budget: str,
+) -> list[str]:
+    rationale: list[str] = []
+    if weather.get("configured"):
+        summary = weather.get("summary") or weather.get("condition") or "configured weather"
+        rationale.append(f"weather context: {summary}")
+    else:
+        rationale.append("weather provider is not configured, so the recommendation stays conservative")
+    if preferences:
+        rationale.append(f"matched {len(preferences)} food-related memory item(s)")
+    else:
+        rationale.append("no confirmed food preference memory was found")
+    if budget:
+        rationale.append(f"budget preference: {budget}")
+    return rationale
 
 
 def _filter_results(raw: object, query: str, limit: int) -> list[dict[str, Any]]:

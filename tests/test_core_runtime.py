@@ -100,6 +100,37 @@ def test_advanced_tools_search_memory_and_environment_context(tmp_path: Path, mo
     assert len((paths.audit / "tool-calls.jsonl").read_text(encoding="utf-8").splitlines()) >= 10
 
 
+def test_meal_recommend_combines_weather_location_and_memory(tmp_path: Path, monkeypatch) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    monkeypatch.setenv("KAIROS_LOCATION_NAME", "Shanghai")
+    monkeypatch.setenv("KAIROS_WEATHER_SUMMARY", "rainy lunch hour")
+    monkeypatch.setenv("KAIROS_WEATHER_TEMPERATURE_C", "11")
+    router = ToolRouter(
+        build_native_registry(paths),
+        PermissionManager(AutonomyLevel.LOW_RISK_AUTO),
+        AuditLogger(paths),
+    )
+    router.call(
+        "memory.save_candidate",
+        {
+            "name": "food_pref_warm_lunch",
+            "description": "User likes warm lunch.",
+            "content": "For lunch, the user likes noodles and warm soup.",
+            "type": "user",
+        },
+    )
+
+    result = router.call("meal.recommend", {"meal_time": "lunch", "include_candidates": True})
+
+    assert result.status == "ok"
+    assert result.data["location"] == "Shanghai"
+    assert result.data["weather"]["summary"] == "rainy lunch hour"
+    assert result.data["preferences"]
+    assert "noodle" in result.data["recommendation"]["primary"]
+    assert result.data["configured"] == {"location": True, "weather": True, "memory": True}
+
+
 def test_tool_router_blocks_medium_without_approval(tmp_path: Path) -> None:
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)
