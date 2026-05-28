@@ -39,7 +39,11 @@ class ToolRouter:
                 action=f"tool:{name}",
                 decision=decision.decision,
                 reason=decision.reason,
-                metadata={"risk_level": spec.risk_level, "source": spec.source},
+                metadata={
+                    "risk_level": spec.risk_level,
+                    "source": spec.source,
+                    "arguments": arguments,
+                },
             )
         )
 
@@ -59,11 +63,27 @@ class ToolRouter:
                     action=f"tool:{name}:error",
                     decision="error",
                     reason=str(exc),
-                    metadata={"risk_level": spec.risk_level, "source": spec.source},
+                    metadata={
+                        "risk_level": spec.risk_level,
+                        "source": spec.source,
+                        "arguments": arguments,
+                    },
                 )
             )
             return ToolExecutionResult(tool_name=name, status="error", preview=str(exc))
 
+        self._audit(
+            AuditEvent(
+                action=f"tool:{name}:result",
+                decision=result.status,
+                reason=result.preview[:240],
+                metadata={
+                    "risk_level": spec.risk_level,
+                    "source": spec.source,
+                    "data_keys": sorted(result.data),
+                },
+            )
+        )
         return ToolExecutionResult(
             tool_name=name,
             status=result.status,

@@ -373,7 +373,41 @@ Toggle body:
 POST /api/daemon/tick
 ```
 
-Runs one synchronous scheduler/delivery tick. This is not a long-running daemon yet.
+Runs one synchronous scheduler/delivery tick.
+
+## Daemon Service
+
+```text
+GET /api/daemon/status
+POST /api/daemon/start
+POST /api/daemon/stop
+```
+
+FastAPI owns a lightweight background daemon controller. It repeatedly runs the
+same scheduler/delivery tick used by `POST /api/daemon/tick`.
+
+Set `KAIROS_DAEMON_INTERVAL_SECONDS` to control the loop interval. Set
+`KAIROS_DAEMON_AUTOSTART=1` to start it automatically with the FastAPI app.
+
+## Heartbeat Tick
+
+```text
+POST /api/heartbeat/tick
+```
+
+Body:
+
+```json
+{
+  "force": true,
+  "channel": "windows_toast",
+  "to": "local-user"
+}
+```
+
+Runs one proactive heartbeat check. A silent heartbeat records `HEARTBEAT_OK`
+in the `kairos-presence` session. A notification-worthy heartbeat enters the
+delivery queue and is sent through the requested channel.
 
 ## Chat Once
 
@@ -481,7 +515,43 @@ Capabilities exposes:
 - skill manifests discovered from `skills/**/SKILL.md` and `.kairos/skills/**/SKILL.md`,
 - MCP/plugin manifests discovered from known local plugin locations.
 
-MCP/plugin manifests are discovery-only in this round. Live MCP transport comes later, and must still route through the shared permission layer.
+Native tools now include local-first web/weather/location/memory helpers and
+`meal.recommend`.
+
+`web.search` supports local fixtures and optional HTTP providers:
+
+```text
+KAIROS_WEB_SEARCH_PROVIDER=brave
+KAIROS_BRAVE_SEARCH_API_KEY=...
+
+KAIROS_WEB_SEARCH_PROVIDER=tavily
+KAIROS_TAVILY_API_KEY=...
+
+KAIROS_WEB_SEARCH_URL=http://127.0.0.1:9000/search?q={query_plus}&n={limit}
+```
+
+MCP tools are loaded from `.kairos/mcp.json`, `mcp.json`, or `.mcp.json` when
+present. Runtime names use:
+
+```text
+mcp.{server}.{tool}
+```
+
+Example:
+
+```json
+{
+  "servers": {
+    "local": {
+      "command": "python",
+      "args": ["scripts/my_mcp_server.py"]
+    }
+  }
+}
+```
+
+MCP tools are medium-risk by default and still pass through the shared
+permission layer.
 
 ## Static Frontend
 

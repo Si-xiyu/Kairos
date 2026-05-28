@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +12,26 @@ from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
 from kairos.backend.service import KairosBackend
+from kairos.presence import BackgroundDaemon
 
 
 def create_app(root: Path) -> FastAPI:
-    app = FastAPI(title="Kairos Backend", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if str(os.environ.get("KAIROS_DAEMON_AUTOSTART", "")).lower() in {"1", "true", "yes", "on"}:
+            _daemon(app).start()
+        try:
+            yield
+        finally:
+            _daemon(app).stop()
+
+    app = FastAPI(title="Kairos Backend", version="0.1.0", lifespan=lifespan)
     app.state.root = Path(root).resolve()
     app.state.backend = KairosBackend(app.state.root)
+    app.state.daemon = BackgroundDaemon(
+        tick_fn=lambda: _backend(app).daemon_tick(),
+        interval_seconds=float(os.environ.get("KAIROS_DAEMON_INTERVAL_SECONDS", "60")),
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -188,6 +204,29 @@ def create_app(root: Path) -> FastAPI:
     def daemon_tick() -> dict[str, Any]:
         return _backend(app).daemon_tick()
 
+    @app.get("/api/daemon/status")
+    def daemon_status() -> dict[str, Any]:
+        return _daemon(app).get_status()
+
+    @app.post("/api/daemon/start")
+    def daemon_start() -> dict[str, Any]:
+        return _daemon(app).start()
+
+    @app.post("/api/daemon/stop")
+    def daemon_stop() -> dict[str, Any]:
+        return _daemon(app).stop()
+
+    @app.post("/api/heartbeat/tick")
+    def heartbeat_tick(body: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = body or {}
+        return _backend(app).heartbeat_tick(
+            force=bool(body.get("force", False)),
+            user_active=bool(body.get("user_active", False)),
+            do_not_disturb=bool(body.get("do_not_disturb", False)),
+            channel=str(body.get("channel", "windows_toast")),
+            to=str(body.get("to", "local-user")),
+        )
+
     @app.post("/api/chat")
     def chat(body: dict[str, Any]) -> dict[str, Any]:
         return _backend(app).chat_once(
@@ -238,6 +277,10 @@ def run_server(host: str, port: int, root: Path) -> None:
 
 def _backend(app: FastAPI) -> KairosBackend:
     return app.state.backend
+
+
+def _daemon(app: FastAPI) -> BackgroundDaemon:
+    return app.state.daemon
 
 
 def _parse_date(raw: object | None) -> date | None:

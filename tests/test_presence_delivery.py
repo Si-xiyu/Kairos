@@ -8,7 +8,9 @@ from kairos.delivery import DeliveryQueue, DeliveryRunner, MAX_RETRIES
 from kairos.messages import OutboundMessage
 from kairos.presence import (
     DaemonRuntime,
+    HEARTBEAT_OK,
     HeartbeatPolicy,
+    HeartbeatRunner,
     HeartbeatState,
     ScheduleStore,
     ScheduledJob,
@@ -140,6 +142,28 @@ def test_should_run_blocks_user_active_and_running():
     ) == (False, "running")
 
 
+def test_heartbeat_runner_records_ok_when_no_action(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    now = datetime(2026, 5, 15, 12, tzinfo=timezone.utc)
+
+    result = HeartbeatRunner(paths).run(now=now, force=True)
+
+    assert result.status == "ok"
+    assert result.message == HEARTBEAT_OK
+    assert result.snapshot["today_journal_exists"] is False
+    assert (paths.conversations / "kairos-presence.jsonl").exists()
+
+
+def test_heartbeat_runner_notifies_for_missing_nightly_journal(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    now = datetime(2026, 5, 15, 22, tzinfo=timezone.utc)
+
+    result = HeartbeatRunner(paths).run(now=now, force=True)
+
+    assert result.status == "notify"
+    assert "journal" in result.message.lower()
+
+
 def test_channel_manager_routes_registered_channels(capsys):
     manager = ChannelManager([CLIChannel()])
 
@@ -261,3 +285,54 @@ def test_daemon_tick_runs_due_job_and_processes_delivery(tmp_path):
     assert result.delivery["delivered"] == 1
     assert sent == [("capture", "local-user", "journal?")]
     assert queue.load_pending() == []
+
+
+def test_daemon_tick_runs_scheduled_heartbeat(tmp_path):
+    paths = KairosPaths.from_root(tmp_path)
+    store = ScheduleStore(paths)
+    queue = DeliveryQueue(paths)
+    now = datetime(2026, 5, 15, 22, tzinfo=timezone.utc)
+    sent: list[tuple[str, str, str]] = []
+
+    store.save(
+        [
+            ScheduledJob(
+                id="heartbeat",
+                name="Heartbeat",
+                schedule={"kind": "interval", "seconds": 60},
+                payload={
+                    "kind": "presence_event",
+                    "event": "heartbeat",
+                    "payload": {"channel": "capture", "to": "local-user", "force": True},
+                },
+                last_run_at=now - timedelta(minutes=2),
+            )
+        ]
+    )
+
+    def handler(event, current_time):
+        run = HeartbeatRunner(paths).run(now=current_time, force=True)
+        if not run.should_notify:
+            return []
+        return [OutboundMessage(channel="capture", to="local-user", text=run.message)]
+
+    class CaptureChannel(CLIChannel):
+        name = "capture"
+
+        def send(self, to: str, text: str, **kwargs: object) -> bool:
+            sent.append((self.name, to, text))
+            return True
+
+    runtime = DaemonRuntime(
+        schedule_store=store,
+        delivery_queue=queue,
+        channel_manager=ChannelManager([CaptureChannel()]),
+        presence_handler=handler,
+    )
+
+    result = runtime.tick(now=now)
+
+    assert result.due_jobs == 1
+    assert result.enqueued == 1
+    assert result.delivery["delivered"] == 1
+    assert "journal" in sent[0][2].lower()

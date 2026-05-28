@@ -77,7 +77,12 @@ class AgentLoop:
                 SessionEvent(
                     role="tool",
                     content=result.preview,
-                    metadata={"tool": result.tool_name, "status": result.status},
+                    metadata={
+                        "tool": result.tool_name,
+                        "status": result.status,
+                        "arguments": dict(command.arguments),
+                        "data": result.data,
+                    },
                 ),
             )
         else:
@@ -162,6 +167,7 @@ class AgentLoop:
                             "tool_call_id": call.id,
                             "status": result.status,
                             "arguments": dict(call.arguments),
+                            "data": result.data,
                         },
                     ),
                 )

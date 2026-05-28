@@ -105,11 +105,13 @@ Stages:
    - replace manual tick-only workflow with a loop
    - keep user interaction higher priority than background work
    - add start/stop/status endpoints or commands
+   - status: MVP complete on `dev/advanced-tools-heartbeat`
 
 2. **R3-S2 Notification Channel**
    - add Windows notification delivery
    - keep CLI delivery as test fallback
    - record notification delivery outcomes
+   - status: MVP complete on `dev/advanced-tools-heartbeat`
 
 3. **R3-S3 Presence Policy**
    - active hours
@@ -145,11 +147,13 @@ Stages:
    - location
    - web search
    - shell/background task tools
+   - status: MVP complete for weather/location/web-search/meal recommendation on `dev/advanced-tools-heartbeat`
 
 4. **R4-S4 MCP Plugin Runtime**
    - connect discovered MCP manifests
    - prefix external tools as `mcp__{server}__{tool}`
    - route external tools through the same permission layer
+   - status: stdio MVP complete on `dev/advanced-tools-heartbeat`
 
 5. **R4-S5 Prompt Assembly**
    - inject confirmed memories
