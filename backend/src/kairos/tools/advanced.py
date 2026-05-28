@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib import parse, request
+from urllib.error import HTTPError, URLError
 
 from kairos.config import KairosPaths
 from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
@@ -37,7 +39,59 @@ class EnvironmentWebSearchAdapter:
             if not path.is_relative_to(self.root):
                 raise ValueError(f"Search fixture escapes project root: {fixture_path}")
             return _filter_results(json.loads(path.read_text(encoding="utf-8")), query, limit)
+        return HttpWebSearchAdapter(self.environ).search(query, limit)
+
+
+@dataclass(frozen=True)
+class HttpWebSearchAdapter:
+    environ: dict[str, str]
+
+    def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        provider = self.environ.get("KAIROS_WEB_SEARCH_PROVIDER", "").strip().lower()
+        if provider == "brave":
+            return self._brave(query, limit)
+        if provider == "tavily":
+            return self._tavily(query, limit)
+        if self.environ.get("KAIROS_WEB_SEARCH_URL"):
+            return self._generic(query, limit)
         return []
+
+    def _brave(self, query: str, limit: int) -> list[dict[str, Any]]:
+        token = self.environ.get("KAIROS_BRAVE_SEARCH_API_KEY") or self.environ.get("BRAVE_SEARCH_API_KEY")
+        if not token:
+            return []
+        url = "https://api.search.brave.com/res/v1/web/search?" + parse.urlencode(
+            {"q": query, "count": limit}
+        )
+        data = _http_json("GET", url, headers={"X-Subscription-Token": token})
+        raw_results = ((data.get("web") or {}).get("results") if isinstance(data, dict) else []) or []
+        return _normalize_search_results(raw_results, limit)
+
+    def _tavily(self, query: str, limit: int) -> list[dict[str, Any]]:
+        token = self.environ.get("KAIROS_TAVILY_API_KEY") or self.environ.get("TAVILY_API_KEY")
+        if not token:
+            return []
+        data = _http_json(
+            "POST",
+            "https://api.tavily.com/search",
+            payload={"api_key": token, "query": query, "max_results": limit},
+        )
+        raw_results = data.get("results", []) if isinstance(data, dict) else []
+        return _normalize_search_results(raw_results, limit)
+
+    def _generic(self, query: str, limit: int) -> list[dict[str, Any]]:
+        template = self.environ["KAIROS_WEB_SEARCH_URL"]
+        url = template.format(
+            query=parse.quote(query),
+            query_plus=parse.quote_plus(query),
+            limit=limit,
+        )
+        header_name = self.environ.get("KAIROS_WEB_SEARCH_HEADER_NAME")
+        header_value = self.environ.get("KAIROS_WEB_SEARCH_HEADER_VALUE")
+        headers = {header_name: header_value} if header_name and header_value else {}
+        data = _http_json("GET", url, headers=headers)
+        raw_results = data.get("results", data) if isinstance(data, dict) else data
+        return _normalize_search_results(raw_results, limit)
 
 
 def build_advanced_tools(paths: KairosPaths) -> list[ToolSpec]:
@@ -155,7 +209,11 @@ def _web_search(adapter: WebSearchAdapter, query: str, limit: int = 5) -> ToolRe
     if not results:
         return ToolResult(
             "ok",
-            "No configured search provider returned results. Set KAIROS_WEB_SEARCH_RESULTS or KAIROS_WEB_SEARCH_FIXTURE for now.",
+            (
+                "No configured search provider returned results. Configure "
+                "KAIROS_WEB_SEARCH_PROVIDER=brave|tavily, KAIROS_WEB_SEARCH_URL, "
+                "or a local fixture."
+            ),
             {"query": query, "results": [], "configured": False},
         )
     preview = "\n".join(
@@ -428,6 +486,45 @@ def _filter_results(raw: object, query: str, limit: int) -> list[dict[str, Any]]
         if len(results) >= limit:
             break
     return results
+
+
+def _normalize_search_results(raw: object, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    results: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or item.get("name") or item.get("heading") or "Untitled")
+        url = str(item.get("url") or item.get("link") or item.get("href") or "")
+        snippet = str(item.get("snippet") or item.get("description") or item.get("content") or "")
+        results.append({"title": title, "url": url, "snippet": snippet})
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _http_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> object:
+    headers = {"Accept": "application/json", **(headers or {})}
+    data: bytes | None = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"web search HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"web search connection failed: {exc.reason}") from exc
+    return json.loads(raw)
 
 
 def _coerce_limit(value: object) -> int:

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from kairos.config import KairosPaths
+from kairos.mcp import build_mcp_tool_specs
 from kairos.tools.advanced import build_advanced_tools
 from kairos.tools.registry import ToolRegistry, ToolResult, ToolSpec
 
@@ -50,6 +51,8 @@ def build_native_registry(paths: KairosPaths) -> ToolRegistry:
         )
     )
     for spec in build_advanced_tools(paths):
+        registry.register(spec)
+    for spec in build_mcp_tool_specs(paths):
         registry.register(spec)
     return registry
 

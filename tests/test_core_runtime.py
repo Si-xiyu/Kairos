@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import http.server
+import json
 from pathlib import Path
+import sys
+from threading import Thread
 
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore, parse_agent_command
@@ -129,6 +133,104 @@ def test_meal_recommend_combines_weather_location_and_memory(tmp_path: Path, mon
     assert result.data["preferences"]
     assert "noodle" in result.data["recommendation"]["primary"]
     assert result.data["configured"] == {"location": True, "weather": True, "memory": True}
+
+
+def test_web_search_generic_http_provider(tmp_path: Path, monkeypatch) -> None:
+    class SearchHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            payload = {
+                "results": [
+                    {"title": "Kairos result", "url": "https://example.test/kairos", "snippet": self.path}
+                ]
+            }
+            raw = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SearchHandler)
+    host, port = server.server_address
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("KAIROS_WEB_SEARCH_URL", f"http://{host}:{port}/search?q={{query_plus}}&n={{limit}}")
+        paths = KairosPaths.from_root(tmp_path)
+        ensure_workspace(paths)
+        router = ToolRouter(
+            build_native_registry(paths),
+            PermissionManager(AutonomyLevel.LOW_RISK_AUTO),
+        )
+
+        result = router.call("web.search", {"query": "kairos search", "limit": 2})
+
+        assert result.status == "ok"
+        assert result.data["configured"] is True
+        assert result.data["results"][0]["title"] == "Kairos result"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_mcp_stdio_tool_is_registered_and_called(tmp_path: Path) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    server = tmp_path / "fake_mcp_server.py"
+    server.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    if "id" not in message:
+        continue
+    if method == "initialize":
+        result = {"protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {"name": "fake"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "echo", "description": "Echo text.", "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]}
+    elif method == "tools/call":
+        text = message.get("params", {}).get("arguments", {}).get("text", "")
+        result = {"content": [{"type": "text", "text": "echo:" + text}]}
+    else:
+        result = {}
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\\n")
+    sys.stdout.flush()
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (paths.home / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "fake": {
+                        "command": sys.executable,
+                        "args": [str(server)],
+                        "timeout_seconds": 3,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    router = ToolRouter(
+        build_native_registry(paths),
+        PermissionManager(AutonomyLevel.APPROVED_SCOPE_AUTO),
+        AuditLogger(paths),
+    )
+
+    result = router.call("mcp.fake.echo", {"text": "hello"})
+
+    assert result.status == "ok"
+    assert result.preview == "echo:hello"
+    assert result.data["server"] == "fake"
 
 
 def test_tool_router_blocks_medium_without_approval(tmp_path: Path) -> None:

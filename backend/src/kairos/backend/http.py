@@ -37,6 +37,8 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.server.backend.doctor())
             elif route == "/api/capabilities":
                 self._send_json(self.server.backend.capabilities())
+            elif route == "/api/daemon/status":
+                self._send_json({"running": False, "transport": "stdlib-http"})
             elif route == "/api/skills":
                 self._send_json(self.server.backend.list_skills())
             elif route.startswith("/api/skills/"):
@@ -178,6 +180,8 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 )
             elif route == "/api/daemon/tick":
                 self._send_json(self.server.backend.daemon_tick())
+            elif route == "/api/daemon/status":
+                self._send_json({"running": False, "transport": "stdlib-http"})
             elif route == "/api/heartbeat/tick":
                 self._send_json(
                     self.server.backend.heartbeat_tick(

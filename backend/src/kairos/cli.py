@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, timezone
 from pathlib import Path
+import time
 
-from kairos.channels import ChannelManager, CLIChannel
+from kairos.channels import ChannelManager, CLIChannel, WindowsToastChannel
 from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore
 from kairos.delivery import DeliveryQueue, DeliveryRunner
@@ -122,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_tick = sub.add_parser("daemon-tick", help="Run one daemon scheduler/delivery tick.")
     daemon_tick.add_argument("--root", default=".")
 
+    daemon = sub.add_parser("daemon", help="Run the long-running Kairos scheduler/delivery loop.")
+    daemon.add_argument("--root", default=".")
+    daemon.add_argument("--interval", type=float, default=60.0)
+    daemon.add_argument("--once", action="store_true", help="Run one loop iteration and exit.")
+
     chat_once = sub.add_parser("chat-once", help="Run one AgentLoop turn.")
     chat_once.add_argument("text")
     chat_once.add_argument("--session", default="default")
@@ -133,7 +139,6 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--root", default=".")
     chat.add_argument("--autonomy", type=int, default=3)
 
-    sub.add_parser("daemon", help="Placeholder for long-running Kairos daemon.")
     return parser
 
 
@@ -317,7 +322,7 @@ def cmd_delivery_enqueue(root: str, channel: str, to: str, text: str) -> int:
 def cmd_delivery_process(root: str) -> int:
     paths = KairosPaths.from_root(Path(root))
     ensure_workspace(paths)
-    channels = {"cli": CLIChannel()}
+    channels = {"cli": CLIChannel(), "windows_toast": WindowsToastChannel()}
 
     def deliver(channel: str, to: str, text: str) -> bool:
         if channel not in channels:
@@ -395,7 +400,7 @@ def cmd_daemon_tick(root: str) -> int:
     runtime = DaemonRuntime(
         schedule_store=ScheduleStore(paths),
         delivery_queue=DeliveryQueue(paths),
-        channel_manager=ChannelManager([CLIChannel()]),
+        channel_manager=ChannelManager([CLIChannel(), WindowsToastChannel()]),
         presence_handler=_presence_handler,
     )
     result = runtime.tick()
@@ -405,6 +410,15 @@ def cmd_daemon_tick(root: str) -> int:
     for key, value in result.delivery.items():
         print(f"delivery_{key}: {value}")
     return 0
+
+
+def cmd_daemon(root: str, interval: float, once: bool) -> int:
+    print(f"Kairos daemon started. interval={interval}s root={Path(root).resolve()}")
+    while True:
+        cmd_daemon_tick(root)
+        if once:
+            return 0
+        time.sleep(interval)
 
 
 def cmd_chat_once(root: str, session: str, text: str, autonomy: int) -> int:
@@ -496,14 +510,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "daemon-tick":
         return cmd_daemon_tick(args.root)
+    if args.command == "daemon":
+        return cmd_daemon(args.root, args.interval, args.once)
     if args.command == "chat-once":
         return cmd_chat_once(args.root, args.session, args.text, args.autonomy)
     if args.command == "chat":
         return cmd_chat(args.root, args.session, args.autonomy)
-    if args.command in {"daemon"}:
-        print(f"`kairos {args.command}` is reserved by the runtime skeleton.")
-        return 0
-
     parser.print_help()
     return 0
 
