@@ -44,7 +44,9 @@ class AgentLoop:
     ) -> None:
         self.context = context
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.chat_provider = chat_provider or provider_from_env()
+        self.chat_provider = chat_provider or provider_from_env(
+            root=context.paths.root if context is not None else None
+        )
         self.context_window = context_window or ContextWindow()
         self.max_tool_rounds = max_tool_rounds
 

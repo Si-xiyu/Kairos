@@ -93,7 +93,7 @@ The current commander-owned runtime contracts include:
 
 Kairos defaults to a local fallback provider so the agent loop can run without secrets or network access.
 
-To connect a real OpenAI-compatible chat API:
+To connect a real OpenAI-compatible chat API, use environment variables:
 
 ```powershell
 $env:KAIROS_LLM_PROVIDER="openai-compatible"
@@ -102,6 +102,30 @@ $env:KAIROS_LLM_API_KEY="..."
 $env:KAIROS_LLM_MODEL="..."
 python app.py --host 127.0.0.1 --port 8765 --root .
 ```
+
+You can also use a repository-local `.env` file:
+
+```text
+KAIROS_LLM_PROVIDER=openai-compatible
+KAIROS_LLM_BASE_URL=https://api.openai.com/v1
+KAIROS_LLM_API_KEY=...
+KAIROS_LLM_MODEL=gpt-4.1-mini
+KAIROS_LLM_TIMEOUT=60
+```
+
+Or a JSON file at `.kairos/llm.json`, `kairos.llm.json`, or `llm.json`:
+
+```json
+{
+  "provider": "openai-compatible",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "...",
+  "model": "gpt-4.1-mini",
+  "timeout": 60
+}
+```
+
+Precedence is: process environment, `.env`, JSON config, then built-in defaults.
 
 The loop now supports plain conversation, OpenAI-compatible model tool calls, and slash-command tools through the existing permission-gated path. Streaming comes next.
 

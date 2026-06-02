@@ -461,7 +461,7 @@ The response is optimized for frontend handoff: it keeps the original
 
 Default model mode is local fallback, which is deterministic and does not call
 the network. To connect an OpenAI-compatible chat-completions endpoint, start
-the backend with:
+the backend with environment variables:
 
 ```text
 KAIROS_LLM_PROVIDER=openai-compatible
@@ -470,6 +470,30 @@ KAIROS_LLM_API_KEY=...
 KAIROS_LLM_MODEL=...
 python app.py --root . --host 127.0.0.1 --port 8765
 ```
+
+The same settings can be stored in `.env`:
+
+```text
+KAIROS_LLM_PROVIDER=openai-compatible
+KAIROS_LLM_BASE_URL=https://api.openai.com/v1
+KAIROS_LLM_API_KEY=...
+KAIROS_LLM_MODEL=gpt-4.1-mini
+KAIROS_LLM_TIMEOUT=60
+```
+
+Or in `.kairos/llm.json`, `kairos.llm.json`, or `llm.json`:
+
+```json
+{
+  "provider": "openai-compatible",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "...",
+  "model": "gpt-4.1-mini",
+  "timeout": 60
+}
+```
+
+Precedence is process environment, then `.env`, then JSON config, then built-in defaults.
 
 ## Weekly Review
 

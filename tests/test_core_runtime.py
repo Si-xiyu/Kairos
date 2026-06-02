@@ -10,6 +10,7 @@ from kairos.config import KairosPaths, ensure_workspace
 from kairos.core import AgentLoop, RuntimeContext, SessionEvent, SessionStore, parse_agent_command
 from kairos.core.context_window import ContextPolicy, ContextWindow
 from kairos.llm import ModelMessage, ModelReply, ModelTool, ModelToolCall
+from kairos.llm import provider_from_env
 from kairos.memory import MemoryStore
 from kairos.messages import InboundMessage
 from kairos.permissions import AuditLogger, AutonomyLevel, PermissionManager
@@ -28,6 +29,38 @@ def test_session_store_round_trip(tmp_path: Path) -> None:
     assert len(events) == 1
     assert events[0].role == "user"
     assert events[0].content == "hello"
+
+
+def test_llm_provider_loads_json_and_dotenv_config(tmp_path: Path) -> None:
+    (tmp_path / "kairos.llm.json").write_text(
+        json.dumps(
+            {
+                "provider": "openai-compatible",
+                "base_url": "https://example.test/v1",
+                "api_key": "json-key",
+                "model": "json-model",
+                "timeout": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "KAIROS_LLM_MODEL=dotenv-model",
+                "KAIROS_LLM_TIMEOUT=9",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    provider = provider_from_env(root=tmp_path, environ={})
+
+    assert provider.name == "openai-compatible"
+    assert provider.base_url == "https://example.test/v1"
+    assert provider.api_key == "json-key"
+    assert provider.model == "dotenv-model"
+    assert provider.timeout_seconds == 9
 
 
 def test_tool_router_allows_low_risk_and_audits(tmp_path: Path) -> None:

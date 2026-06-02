@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
+from pathlib import Path
 from typing import Mapping, Protocol
 from urllib import request
 from urllib.error import HTTPError, URLError
+
+from kairos.llm_config import load_llm_environment
 
 
 @dataclass(frozen=True)
@@ -154,8 +156,11 @@ class OpenAICompatibleProvider:
         )
 
 
-def provider_from_env(environ: Mapping[str, str] | None = None) -> ChatProvider:
-    environ = environ or os.environ
+def provider_from_env(
+    environ: Mapping[str, str] | None = None,
+    root: Path | None = None,
+) -> ChatProvider:
+    environ = load_llm_environment(root=root, environ=environ)
     provider = environ.get("KAIROS_LLM_PROVIDER", "local").strip().lower()
     if provider in {"", "local", "mock", "fallback"}:
         return LocalCompanionProvider()

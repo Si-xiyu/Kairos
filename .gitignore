@@ -13,3 +13,8 @@ dist/
 build/
 *.egg-info/
 .kairos-server.*.log
+.env
+*.env
+kairos.llm.json
+llm.json
+.kairos/llm.json
