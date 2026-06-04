@@ -33,6 +33,8 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "service": "kairos"})
             elif route == "/api/state":
                 self._send_json(self.server.backend.state())
+            elif route == "/api/today":
+                self._send_json(self.server.backend.today())
             elif route == "/api/doctor":
                 self._send_json(self.server.backend.doctor())
             elif route == "/api/capabilities":
@@ -44,13 +46,33 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
             elif route.startswith("/api/skills/"):
                 self._send_json(self.server.backend.read_skill(_route_tail(route, "/api/skills/")))
             elif route == "/api/journals":
-                limit = int(query.get("limit", ["30"])[0])
-                self._send_json(self.server.backend.list_journals(limit=limit))
+                self._send_json(self.server.backend.list_journals(limit=int(query.get("limit", ["30"])[0])))
+            elif route == "/api/journal/artifacts":
+                self._send_json(
+                    self.server.backend.list_journal_artifacts(
+                        artifact_type=query.get("type", [None])[0],
+                        limit=int(query.get("limit", ["50"])[0]),
+                    )
+                )
+            elif route.startswith("/api/journal/artifacts/"):
+                self._send_json(
+                    self.server.backend.read_journal_artifact(
+                        _route_tail(route, "/api/journal/artifacts/")
+                    )
+                )
+            elif route == "/api/todos":
+                self._send_json(
+                    self.server.backend.list_todos(
+                        status=query.get("status", [None])[0],
+                        list_id=query.get("list_id", [None])[0],
+                    )
+                )
+            elif route == "/api/todo-lists":
+                self._send_json(self.server.backend.list_todo_lists())
             elif route == "/api/schedules":
                 self._send_json(self.server.backend.list_schedules())
             elif route == "/api/sessions":
-                limit = int(query.get("limit", ["50"])[0])
-                self._send_json(self.server.backend.list_sessions(limit=limit))
+                self._send_json(self.server.backend.list_sessions(limit=int(query.get("limit", ["50"])[0])))
             elif route.startswith("/api/sessions/"):
                 session_id, child = _session_route(route)
                 if child == "messages":
@@ -65,8 +87,7 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 include = _truthy(query.get("include_candidates", ["false"])[0])
                 self._send_json(self.server.backend.list_memories(include_candidates=include))
             elif route == "/api/journal":
-                raw_date = query.get("date", [None])[0]
-                self._send_json(self.server.backend.read_journal(_parse_date(raw_date)))
+                self._send_json(self.server.backend.read_journal(_parse_date(query.get("date", [None])[0])))
             elif route.startswith("/api/"):
                 self._send_error(404, f"unknown route: {route}")
             else:
@@ -122,6 +143,26 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                         include_roles=body.get("include_roles"),
                     )
                 )
+            elif route == "/api/journal/artifacts":
+                self._send_json(self.server.backend.create_journal_artifact(body))
+            elif route == "/api/journal/artifacts/update":
+                self._send_json(self.server.backend.update_journal_artifact(_body_id(body, "artifact_id"), body))
+            elif route == "/api/journal/artifacts/delete":
+                self._send_json(self.server.backend.delete_journal_artifact(_body_id(body, "artifact_id")))
+            elif route == "/api/todos":
+                self._send_json(self.server.backend.create_todo(body))
+            elif route == "/api/todos/update":
+                self._send_json(self.server.backend.update_todo(_body_id(body, "todo_id"), body))
+            elif route == "/api/todos/delete":
+                self._send_json(self.server.backend.delete_todo(_body_id(body, "todo_id")))
+            elif route == "/api/todos/complete":
+                self._send_json(self.server.backend.complete_todo(_body_id(body, "todo_id")))
+            elif route == "/api/todo-lists":
+                self._send_json(self.server.backend.create_todo_list(body))
+            elif route == "/api/todo-lists/update":
+                self._send_json(self.server.backend.update_todo_list(_body_id(body, "list_id"), body))
+            elif route == "/api/todo-lists/delete":
+                self._send_json(self.server.backend.delete_todo_list(_body_id(body, "list_id")))
             elif route == "/api/memories":
                 self._send_json(
                     self.server.backend.save_memory(
@@ -143,9 +184,7 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                         name=str(body["name"]),
                         description=body.get("description"),
                         content=body.get("content"),
-                        confidence=(
-                            float(body["confidence"]) if "confidence" in body else None
-                        ),
+                        confidence=float(body["confidence"]) if "confidence" in body else None,
                         candidate=body.get("candidate"),
                     )
                 )
@@ -307,6 +346,13 @@ def _parse_datetime(raw: object | None) -> datetime | None:
 
 def _truthy(raw: str) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _body_id(body: dict[str, Any], alias: str) -> str:
+    value = body.get("id", body.get(alias, ""))
+    if not value:
+        raise ValueError("id is required")
+    return str(value)
 
 
 def _route_tail(route: str, prefix: str) -> str:

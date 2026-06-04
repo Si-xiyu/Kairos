@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,42 +20,33 @@ class MemoryCandidate:
 
 
 class MemoryCandidateExtractor:
-    """Extracts memory candidates from reflection drafts using simple heuristics."""
+    """Extract memory candidates from reflection drafts using simple heuristics."""
 
-    # Keywords for candidate extraction
     USER_PREFERENCE_KEYWORDS = {"喜欢", "偏好", "希望", "想要", "倾向于", "更愿意", "以后"}
-    FEEDBACK_KEYWORDS = {"不喜欢", "不要", "别", "避免", "不想", "厌恶"}
+    FEEDBACK_KEYWORDS = {"不喜欢", "不要", "别", "避免", "不想", "讨厌"}
     ENERGY_POSITIVE_KEYWORDS = {"有能量", "有精力", "精力充沛", "开心", "兴奋", "满足", "成就"}
     ENERGY_NEGATIVE_KEYWORDS = {"消耗", "疲惫", "累", "无力", "疲倦", "困"}
     PATTERN_KEYWORDS = {"反复", "总是", "通常", "经常", "每次", "又"}
 
     @classmethod
     def extract_from_draft(cls, draft: DailyReflectionDraft) -> list[MemoryCandidate]:
-        """Extract memory candidates from a reflection draft."""
         candidates: list[MemoryCandidate] = []
         lines = cls._draft_lines(draft)
         all_text = "\n".join(lines)
 
-        # Check for user preferences
         positive_lines = [
             line
             for line in cls._matching_lines(lines, cls.USER_PREFERENCE_KEYWORDS)
             if not any(keyword in line for keyword in cls.FEEDBACK_KEYWORDS)
         ]
         if positive_lines:
-            candidates.append(
-                cls._create_preference_candidate(draft, positive_lines, is_positive=True)
-            )
+            candidates.append(cls._create_preference_candidate(draft, positive_lines, is_positive=True))
 
-        # Check for negative feedback
         feedback_lines = cls._matching_lines(lines, cls.FEEDBACK_KEYWORDS)
         if feedback_lines:
-            candidates.append(
-                cls._create_preference_candidate(draft, feedback_lines, is_positive=False)
-            )
+            candidates.append(cls._create_preference_candidate(draft, feedback_lines, is_positive=False))
 
-        # Check for energy patterns
-        if any(kw in all_text for kw in cls.ENERGY_POSITIVE_KEYWORDS):
+        if any(keyword in all_text for keyword in cls.ENERGY_POSITIVE_KEYWORDS):
             candidates.append(
                 MemoryCandidate(
                     entry=MemoryEntry(
@@ -69,7 +59,7 @@ class MemoryCandidateExtractor:
                     reason="Positive energy keywords detected",
                 )
             )
-        elif any(kw in all_text for kw in cls.ENERGY_NEGATIVE_KEYWORDS):
+        elif any(keyword in all_text for keyword in cls.ENERGY_NEGATIVE_KEYWORDS):
             candidates.append(
                 MemoryCandidate(
                     entry=MemoryEntry(
@@ -83,8 +73,7 @@ class MemoryCandidateExtractor:
                 )
             )
 
-        # Check for recurring patterns
-        if any(kw in all_text for kw in cls.PATTERN_KEYWORDS):
+        if any(keyword in all_text for keyword in cls.PATTERN_KEYWORDS):
             candidates.append(
                 MemoryCandidate(
                     entry=MemoryEntry(
@@ -94,7 +83,7 @@ class MemoryCandidateExtractor:
                         content=all_text,
                         source=f"journal/{draft.journal_date.isoformat()}",
                     ),
-                    reason="Pattern keywords (反复/总是/经常) detected",
+                    reason="Pattern keywords detected",
                 )
             )
 
@@ -124,12 +113,10 @@ class MemoryCandidateExtractor:
     def _create_preference_candidate(
         cls, draft: DailyReflectionDraft, lines: list[str], is_positive: bool
     ) -> MemoryCandidate:
-        """Create a preference memory candidate."""
         content = "\n".join(lines[:3])
         mem_type = MemoryType.USER if is_positive else MemoryType.FEEDBACK
         journal_date = draft.journal_date.isoformat()
         kind = "prefer" if is_positive else "avoid"
-
         return MemoryCandidate(
             entry=MemoryEntry(
                 name=f"{kind}_{journal_date}",
@@ -143,10 +130,6 @@ class MemoryCandidateExtractor:
 
 
 def save_candidates(store: MemoryStore, candidates: list[MemoryCandidate]) -> list[Path]:
-    """Save memory candidates to the store.
-
-    Returns list of paths where candidates were saved.
-    """
     paths: list[Path] = []
     for candidate in candidates:
         entry = replace(candidate.entry, candidate_reason=candidate.reason)

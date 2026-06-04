@@ -162,7 +162,7 @@ def cmd_bootstrap(root: str, force: bool) -> int:
             "kind": "presence_event",
             "event": "daily_journal_check",
             "payload": {
-                "message": "今天还没有留下记录。要不要随便丢几个碎片给我，我帮你整理成日记？",
+                "message": "今天还没有留下记录。要不要随手丢几个碎片给我，我帮你整理成日记？",
                 "channel": "cli",
                 "to": "local-user",
             },
@@ -556,7 +556,7 @@ def _presence_handler(event: PresenceEvent, now: datetime):
 
 def _default_presence_message(event: PresenceEvent) -> str:
     if event.event == "daily_journal_check":
-        return "今天还没有留下记录。要不要随便丢几个碎片给我，我帮你整理成日记？"
+        return "今天还没有留下记录。要不要随手丢几个碎片给我，我帮你整理成日记？"
     if event.event == "heartbeat":
         return "Kairos heartbeat check."
     return f"Kairos presence event: {event.event}"

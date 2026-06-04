@@ -9,6 +9,9 @@ from urllib.error import HTTPError, URLError
 
 from kairos.llm_config import load_llm_environment
 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+
 
 @dataclass(frozen=True)
 class ModelMessage:
@@ -70,7 +73,7 @@ class LocalCompanionProvider:
     ) -> ModelReply:
         last_user = next((message.content for message in reversed(messages) if message.role == "user"), "")
         if not last_user.strip():
-            text = "我在。你可以直接和我说接下来要推进什么。"
+            text = "我在。你可以直接告诉我接下来要推进什么。"
         else:
             text = (
                 "我在，先用本地 MVP 模式陪你把对话跑通。\n\n"
@@ -101,7 +104,7 @@ class OpenAICompatibleProvider:
         messages: list[ModelMessage],
         tools: list[ModelTool] | None = None,
     ) -> ModelReply:
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -164,14 +167,14 @@ def provider_from_env(
     provider = environ.get("KAIROS_LLM_PROVIDER", "local").strip().lower()
     if provider in {"", "local", "mock", "fallback"}:
         return LocalCompanionProvider()
-    if provider in {"openai", "openai-compatible", "api"}:
+    if provider in {"openai", "openai-compatible", "api", "deepseek"}:
         return OpenAICompatibleProvider(
             base_url=environ.get("KAIROS_LLM_BASE_URL")
             or environ.get("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1",
+            or DEEPSEEK_BASE_URL,
             model=environ.get("KAIROS_LLM_MODEL")
             or environ.get("MODEL_ID")
-            or "gpt-4.1-mini",
+            or DEEPSEEK_DEFAULT_MODEL,
             api_key=environ.get("KAIROS_LLM_API_KEY") or environ.get("OPENAI_API_KEY"),
             timeout_seconds=int(environ.get("KAIROS_LLM_TIMEOUT", "60")),
         )

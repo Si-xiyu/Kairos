@@ -15,34 +15,26 @@ from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 
 
 def test_journal_draft_builder_from_fragments(tmp_path):
-    """Test building draft from fragments."""
     today = date(2026, 5, 15)
     fragments = [
-        ReflectionFragment(
-            text="今天完成了Kairos的Memory System设计",
-            source="user",
-        ),
-        ReflectionFragment(
-            text="我觉得很有成就感，但又有点累",
-            source="user",
-        ),
+        ReflectionFragment(text="今天完成了 Kairos 的 Memory System 设计", source="user"),
+        ReflectionFragment(text="我觉得很有成就感，但又有点累", source="user"),
     ]
 
     draft = JournalDraftBuilder.from_fragments(today, fragments)
 
     assert draft.journal_date == today
-    assert len(draft.actions) > 0
-    assert len(draft.thoughts) > 0
+    assert draft.actions
+    assert draft.thoughts
 
 
 def test_daily_reflection_draft_to_markdown_sections():
-    """Test converting draft to markdown."""
     today = date(2026, 5, 15)
     draft = DailyReflectionDraft(
         journal_date=today,
         happened=["一个平静的上午"],
         thoughts=["想要更多休息"],
-        actions=["实现Memory模块"],
+        actions=["实现 Memory 模块"],
     )
 
     sections = draft.to_markdown_sections()
@@ -54,7 +46,6 @@ def test_daily_reflection_draft_to_markdown_sections():
 
 
 def test_write_reflection_draft_to_journal(tmp_path):
-    """Test writing draft to journal."""
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)
     store = DailyJournalStore(paths)
@@ -69,13 +60,10 @@ def test_write_reflection_draft_to_journal(tmp_path):
     written_path = write_reflection_draft(store, draft)
 
     assert written_path.exists()
-
-    content = store.read(today)
-    assert "测试完成" in content
+    assert "测试完成" in store.read(today)
 
 
 def test_memory_candidate_extractor_from_draft():
-    """Test extracting candidates from draft."""
     today = date(2026, 5, 15)
     draft = DailyReflectionDraft(
         journal_date=today,
@@ -86,58 +74,48 @@ def test_memory_candidate_extractor_from_draft():
     candidates = MemoryCandidateExtractor.extract_from_draft(draft)
 
     preference_candidates = [c for c in candidates if c.entry.type == MemoryType.USER]
-    # Should detect energy pattern
     energy_candidates = [c for c in candidates if c.entry.type == MemoryType.ENERGY_PATTERN]
-    assert len(preference_candidates) > 0
-    assert len(energy_candidates) > 0
+    assert preference_candidates
+    assert energy_candidates
     assert preference_candidates[0].entry.source == "journal/2026-05-15"
 
 
 def test_save_candidates_to_store(tmp_path):
-    """Test saving candidates to memory store."""
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)
     store = MemoryStore(paths)
 
-    today = date(2026, 5, 15)
     draft = DailyReflectionDraft(
-        journal_date=today,
+        journal_date=date(2026, 5, 15),
         energy=["今天很有精力"],
     )
 
     candidates = MemoryCandidateExtractor.extract_from_draft(draft)
     saved_paths = save_candidates(store, candidates)
 
-    assert len(saved_paths) > 0
-    for p in saved_paths:
-        assert p.exists()
-        assert "candidates" in str(p)
-        assert store.load(p).candidate_reason
+    assert saved_paths
+    for path in saved_paths:
+        assert path.exists()
+        assert "candidates" in str(path)
+        assert store.load(path).candidate_reason
 
 
 def test_candidates_not_in_default_list(tmp_path):
-    """Test that candidates don't appear in default list."""
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)
     store = MemoryStore(paths)
 
-    today = date(2026, 5, 15)
-    draft = DailyReflectionDraft(journal_date=today, energy=["反复消耗在切换上下文上"])
+    draft = DailyReflectionDraft(
+        journal_date=date(2026, 5, 15),
+        energy=["反复消耗在切换上下文上"],
+    )
 
     candidates = MemoryCandidateExtractor.extract_from_draft(draft)
     assert candidates
     save_candidates(store, candidates)
 
-    # Default list should not include candidates
-    default_entries = store.list()
-    entry_names = [e.name for e in default_entries]
-
+    default_names = [entry.name for entry in store.list()]
+    all_names = [entry.name for entry in store.list(include_candidates=True)]
     for candidate in candidates:
-        assert candidate.entry.name not in entry_names
-
-    # With include_candidates=True, they should appear
-    all_entries = store.list(include_candidates=True)
-    all_names = [e.name for e in all_entries]
-
-    for candidate in candidates:
+        assert candidate.entry.name not in default_names
         assert candidate.entry.name in all_names

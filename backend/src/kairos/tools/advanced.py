@@ -9,6 +9,7 @@ from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
 from kairos.config import KairosPaths
+from kairos.backend.todos import TodoStore, proposed_todo
 from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
 from kairos.tools.registry import ToolResult, ToolSpec
 
@@ -179,6 +180,46 @@ def build_advanced_tools(paths: KairosPaths) -> list[ToolSpec]:
             ),
         ),
         ToolSpec(
+            name="todo.propose",
+            description="Prepare a proposed Todo for user confirmation without saving it.",
+            input_schema=_todo_schema(required=["title"]),
+            risk_level="low",
+            source="native",
+            handler=lambda **kwargs: _todo_propose(kwargs),
+        ),
+        ToolSpec(
+            name="todo.create",
+            description="Create a reliable Todo or reminder after permission approval.",
+            input_schema=_todo_schema(required=["title"]),
+            risk_level="medium",
+            source="native",
+            handler=lambda **kwargs: _todo_create(paths, kwargs),
+        ),
+        ToolSpec(
+            name="todo.update",
+            description="Update an existing Todo after permission approval.",
+            input_schema=_todo_schema(required=["id"]),
+            risk_level="medium",
+            source="native",
+            handler=lambda **kwargs: _todo_update(paths, kwargs),
+        ),
+        ToolSpec(
+            name="todo.complete",
+            description="Mark an existing Todo completed after permission approval.",
+            input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+            risk_level="medium",
+            source="native",
+            handler=lambda id: _todo_complete(paths, id),
+        ),
+        ToolSpec(
+            name="todo.delete",
+            description="Delete an existing Todo after permission approval.",
+            input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+            risk_level="medium",
+            source="native",
+            handler=lambda id: _todo_delete(paths, id),
+        ),
+        ToolSpec(
             name="meal.recommend",
             description=(
                 "Recommend what the user should eat for a meal by combining configured "
@@ -329,6 +370,59 @@ def _save_memory_candidate(
         f"Saved memory candidate: {entry.name}",
         {"memory": entry.name, "candidate": True, "path": str(path)},
     )
+
+
+def _todo_schema(required: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "title": {"type": "string"},
+            "notes": {"type": "string"},
+            "kind": {"type": "string", "enum": ["event", "task", "reminder"]},
+            "list_id": {"type": "string"},
+            "status": {"type": "string", "enum": ["open", "completed"]},
+            "due_at": {"type": "string"},
+            "remind_at": {"type": "string"},
+            "reminder_level": {"type": "string", "enum": ["high", "normal", "none"]},
+            "source": {"type": "string", "enum": ["manual", "kairos", "chat"]},
+            "source_ref": {"type": "string"},
+        },
+        "required": required,
+    }
+
+
+def _todo_propose(values: dict[str, Any]) -> ToolResult:
+    proposal = proposed_todo({**values, "source": values.get("source", "kairos")})
+    todo = proposal["todo"]
+    return ToolResult(
+        "ok",
+        f"Proposed todo: {todo['title']}",
+        proposal,
+    )
+
+
+def _todo_create(paths: KairosPaths, values: dict[str, Any]) -> ToolResult:
+    todo = TodoStore(paths).create_todo({**values, "source": values.get("source", "kairos")})
+    return ToolResult("ok", f"Created todo: {todo['title']}", {"todo": todo})
+
+
+def _todo_update(paths: KairosPaths, values: dict[str, Any]) -> ToolResult:
+    todo_id = str(values.pop("id"))
+    todo = TodoStore(paths).update_todo(todo_id, values)
+    return ToolResult("ok", f"Updated todo: {todo['title']}", {"todo": todo})
+
+
+def _todo_complete(paths: KairosPaths, todo_id: str) -> ToolResult:
+    todo = TodoStore(paths).complete_todo(str(todo_id))
+    return ToolResult("ok", f"Completed todo: {todo['title']}", {"todo": todo})
+
+
+def _todo_delete(paths: KairosPaths, todo_id: str) -> ToolResult:
+    deleted = TodoStore(paths).delete_todo(str(todo_id))
+    status = "ok" if deleted else "error"
+    preview = f"Deleted todo: {todo_id}" if deleted else f"Todo not found: {todo_id}"
+    return ToolResult(status, preview, {"deleted": deleted})
 
 
 def _meal_recommend(

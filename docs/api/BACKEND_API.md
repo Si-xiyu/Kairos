@@ -6,14 +6,7 @@ Start the backend from the repository root:
 python app.py --root . --host 127.0.0.1 --port 8765
 ```
 
-The repository root `app.py` is a compatibility wrapper. The backend-owned
-entrypoint is:
-
-```text
-python backend/app.py --root . --host 127.0.0.1 --port 8765
-```
-
-The backend runs FastAPI through Uvicorn. It returns JSON and enables permissive CORS for local frontend development.
+The backend returns JSON, enables permissive CORS for local frontend development, and preserves the existing route surface.
 
 Base URL:
 
@@ -27,13 +20,8 @@ http://127.0.0.1:8765
 GET /api/health
 ```
 
-Response:
-
 ```json
-{
-  "ok": true,
-  "service": "kairos"
-}
+{"ok": true, "service": "kairos"}
 ```
 
 ## Bootstrap
@@ -45,12 +33,14 @@ POST /api/bootstrap
 Body:
 
 ```json
-{
-  "force": false
-}
+{"force": false}
 ```
 
-Creates `.kairos/` and installs the default nightly journal reminder.
+Creates `.kairos/` and installs the default nightly diary reminder:
+
+```text
+今天还没有留下记录。要不要随手丢几个碎片给我，我帮你整理成日记？
+```
 
 ## Doctor
 
@@ -58,16 +48,7 @@ Creates `.kairos/` and installs the default nightly journal reminder.
 GET /api/doctor
 ```
 
-Returns local workspace counts:
-
-```json
-{
-  "initialized": true,
-  "journals": 1,
-  "memory_candidates": 2,
-  "schedules": 1
-}
-```
+Returns local workspace counts for conversations, journals, memory, schedules, delivery, and audit events.
 
 ## Application State
 
@@ -75,196 +56,168 @@ Returns local workspace counts:
 GET /api/state
 ```
 
-Returns one frontend-friendly snapshot:
+Returns the existing frontend-friendly snapshot. The `today` field remains compact for compatibility. Use `GET /api/today` for the full Today View payload.
+
+## Today View
+
+```text
+GET /api/today
+```
+
+Returns a single payload for the Today View:
 
 ```json
 {
-  "app": {"name": "Kairos", "mode": "local-first-backend"},
-  "doctor": {},
-  "today": {"date": "2026-05-16", "journal_exists": true},
-  "recent_journals": [],
-  "memories": {"confirmed": 1, "candidates": 0, "total": 1},
-  "schedules": {"total": 1, "enabled": 1, "due": 0, "items": []},
+  "date": "2026-06-04",
+  "diary": {"date": "2026-06-04", "exists": false, "path": "...", "available": true},
+  "todos": {"available": true, "items": [], "total_open": 0},
+  "reminders": {"available": true, "total": 1, "enabled": 1, "due": 0, "items": []},
+  "recent_artifacts": [],
+  "recent_sessions": [],
+  "memory": {"pending_candidates": 0, "available": true},
+  "approvals": {"available": false, "pending": 0},
   "delivery": {"pending": 0, "failed": 0},
-  "capabilities": {"tools": 3, "skills": 0, "mcp_plugins": 0}
+  "daemon": {"available": true, "heartbeat_session_id": "kairos-presence", "presence_events": 0},
+  "model": {"provider": "local", "suggested_provider": "deepseek", "model": "kairos-local-mvp"}
 }
 ```
+
+Sections that are not yet backed by durable state use explicit `available: false` fields rather than requiring frontend guesses.
 
 ## Sessions
 
-These routes adapt Kairos JSONL conversation logs to the current React frontend shape.
-
 ```text
 GET /api/sessions?limit=50
-```
-
-Returns:
-
-```json
-{
-  "sessions": [
-    {
-      "id": "default",
-      "title": "Default",
-      "summary": "Recent user message...",
-      "updatedAt": "2026-05-16T12:00:00+00:00",
-      "unreadCount": 0,
-      "status": "active"
-    }
-  ]
-}
-```
-
-```text
 POST /api/sessions
-```
-
-Body:
-
-```json
-{
-  "id": "session-ui",
-  "title": "UI integration",
-  "summary": "Frontend adapter smoke session."
-}
-```
-
-```text
 GET /api/sessions/{id}
-```
-
-Returns one normalized session:
-
-```json
-{
-  "session": {
-    "id": "session-ui",
-    "title": "UI integration",
-    "summary": "Recent user message...",
-    "updatedAt": "2026-05-16T12:00:00+00:00",
-    "unreadCount": 0,
-    "status": "idle"
-  }
-}
-```
-
-```text
 GET /api/sessions/{id}/messages
 GET /api/sessions/{id}/events
 ```
 
-Messages are normalized into `{id, sessionId, role, author, createdAt, status, blocks}`.
+Messages are normalized into `{id, sessionId, role, author, createdAt, status, blocks}`. Events are normalized for the frontend Agent Inspector.
 
-Events are normalized for the frontend Agent Inspector into `{id, sessionId, kind, title, timestamp, status, summary, details}`.
-
-## Reflect
+## Chat Once
 
 ```text
-POST /api/reflect
+POST /api/chat
 ```
 
 Body:
 
 ```json
-{
-  "text": "我喜欢先讨论架构，今天很有能量",
-  "date": "2026-05-16",
-  "source": "frontend",
-  "save_candidates": true
-}
+{"text": "/tool file.list path=.", "session": "default", "autonomy": 3}
 ```
 
-Writes a daily journal and optionally saves memory candidates.
+Runs one `AgentLoop` turn. Slash-command tools and model tool calls execute through the permission-gated `ToolRouter` and audit log.
 
-The response includes extracted candidate summaries:
+## Todo
+
+Todo fields:
 
 ```json
 {
-  "candidates": [
-    {
-      "name": "prefer_2026-05-16",
-      "description": "User preference candidate from reflection draft.",
-      "type": "user",
-      "reason": "Positive preference keywords detected",
-      "source": "journal/2026-05-16"
-    }
-  ]
+  "id": "todo-abc123",
+  "title": "Submit backend API",
+  "notes": "",
+  "kind": "task",
+  "list_id": "inbox",
+  "status": "open",
+  "due_at": "2026-06-04T12:00:00+00:00",
+  "remind_at": null,
+  "reminder_level": "normal",
+  "source": "manual",
+  "source_ref": null,
+  "created_at": "...",
+  "updated_at": "..."
 }
 ```
+
+Routes:
+
+```text
+GET /api/todos
+POST /api/todos
+POST /api/todos/update
+POST /api/todos/delete
+POST /api/todos/complete
+GET /api/todo-lists
+POST /api/todo-lists
+POST /api/todo-lists/update
+POST /api/todo-lists/delete
+```
+
+`POST /api/todos` accepts the Todo fields above except timestamps. Manual frontend-created todos can be saved directly. Agent-created reliable todos should go through the tool/permission path.
+
+Todo tools:
+
+```text
+todo.propose
+todo.create
+todo.update
+todo.complete
+todo.delete
+```
+
+`todo.propose` is low risk and returns a proposed todo without saving. Creating, updating, completing, and deleting reliable todos are medium risk and pass through `ToolRouter`, `PermissionManager`, and `AuditLogger`.
 
 ## Journal
 
+Legacy daily journal routes remain supported:
+
 ```text
 GET /api/journal?date=2026-05-16
-```
-
-Returns:
-
-```json
-{
-  "date": "2026-05-16",
-  "path": "...",
-  "exists": true,
-  "content": "# 2026-05-16\n..."
-}
-```
-
-```text
 GET /api/journals?limit=30
-```
-
-Lists journal files, newest first.
-
-```text
 POST /api/journal
-```
-
-Body:
-
-```json
-{
-  "date": "2026-05-16",
-  "content": "# 2026-05-16\n\n## 今天发生了什么\n\n..."
-}
-```
-
-```text
 POST /api/journal/append
-```
-
-Body:
-
-```json
-{
-  "date": "2026-05-16",
-  "heading": "有价值的对话",
-  "text": "今天和 Kairos 梳理了第一轮后端。"
-}
-```
-
-```text
 POST /api/journal/capture-session
 ```
 
-Copies a JSONL conversation into a daily Markdown journal section.
+Default capture heading:
 
-Body:
-
-```json
-{
-  "date": "2026-05-16",
-  "session": "daily-chat",
-  "heading": "有价值的对话",
-  "include_roles": ["user", "assistant"]
-}
+```text
+有价值的对话
 ```
 
-Returns the updated journal plus:
+## Journal Artifacts
+
+Journal artifacts are Markdown files with YAML front matter. Built-in categories are `diary` and `record`.
+
+Required front matter:
+
+```yaml
+---
+type: diary
+title: Daily note
+created_at: 2026-06-04T12:00:00+00:00
+updated_at: 2026-06-04T12:00:00+00:00
+tags: []
+source:
+  kind: manual
+  session_id: null
+date: 2026-06-04
+---
+```
+
+Routes:
+
+```text
+GET /api/journal/artifacts?type=diary&limit=50
+GET /api/journal/artifacts/{id}
+POST /api/journal/artifacts
+POST /api/journal/artifacts/update
+POST /api/journal/artifacts/delete
+```
+
+Create body:
 
 ```json
 {
-  "captured": 2,
-  "session_id": "daily-chat"
+  "type": "record",
+  "title": "Backend slice",
+  "summary": "Today, Todo, Journal artifact",
+  "tags": ["kairos"],
+  "source": {"kind": "manual", "session_id": null},
+  "body": "实现后端可用切片。"
 }
 ```
 
@@ -272,70 +225,29 @@ Returns the updated journal plus:
 
 ```text
 GET /api/memories?include_candidates=true
-```
-
-Returns confirmed memories and, when requested, candidate memories.
-
-Memory entries include candidate review fields:
-
-```json
-{
-  "candidate": true,
-  "candidate_reason": "Positive preference keywords detected",
-  "source": "journal/2026-05-16",
-  "source_journal_date": "2026-05-16"
-}
-```
-
-```text
 POST /api/memories
-```
-
-Creates a confirmed memory or a candidate:
-
-```json
-{
-  "name": "prefers_architecture_first",
-  "description": "User likes discussing architecture before implementation.",
-  "type": "user",
-  "scope": "private",
-  "confidence": 0.7,
-  "candidate": false,
-  "content": "用户喜欢先讨论架构，再进入实现。"
-}
-```
-
-```text
 POST /api/memories/confirm
 POST /api/memories/update
 POST /api/memories/delete
 ```
 
-Confirm body:
+Memory remains agent-facing context. Candidate memories are not promoted automatically.
 
-```json
-{"name": "prefers_architecture_first"}
-```
-
-Delete body:
-
-```json
-{"name": "prefers_architecture_first", "candidate": false}
-```
-
-## Schedule
+## Schedule, Daemon, Heartbeat
 
 ```text
 GET /api/schedules
-```
-
-Lists all scheduled jobs.
-
-```text
 POST /api/schedules
+POST /api/schedules/toggle
+POST /api/schedules/delete
+POST /api/daemon/tick
+GET /api/daemon/status
+POST /api/daemon/start
+POST /api/daemon/stop
+POST /api/heartbeat/tick
 ```
 
-Body:
+Schedule example:
 
 ```json
 {
@@ -349,181 +261,21 @@ Body:
 }
 ```
 
-Supported `kind` values for the frontend MVP:
+## Model Provider
 
-- `every`
-- `at`
+Kairos defaults to a deterministic local fallback provider.
 
-For `at`, pass an ISO datetime in `at`, unless `due_now` is true.
-
-```text
-POST /api/schedules/toggle
-POST /api/schedules/delete
-```
-
-Toggle body:
-
-```json
-{"id": "demo", "enabled": false}
-```
-
-## Daemon Tick
-
-```text
-POST /api/daemon/tick
-```
-
-Runs one synchronous scheduler/delivery tick.
-
-## Daemon Service
-
-```text
-GET /api/daemon/status
-POST /api/daemon/start
-POST /api/daemon/stop
-```
-
-FastAPI owns a lightweight background daemon controller. It repeatedly runs the
-same scheduler/delivery tick used by `POST /api/daemon/tick`.
-
-Set `KAIROS_DAEMON_INTERVAL_SECONDS` to control the loop interval. Set
-`KAIROS_DAEMON_AUTOSTART=1` to start it automatically with the FastAPI app.
-
-## Heartbeat Tick
-
-```text
-POST /api/heartbeat/tick
-```
-
-Body:
-
-```json
-{
-  "force": true,
-  "channel": "windows_toast",
-  "to": "local-user"
-}
-```
-
-Runs one proactive heartbeat check. A silent heartbeat records `HEARTBEAT_OK`
-in the `kairos-presence` session. A notification-worthy heartbeat enters the
-delivery queue and is sent through the requested channel.
-
-## Chat Once
-
-```text
-POST /api/chat
-```
-
-Body:
-
-```json
-{
-  "text": "/tool file.list path=.",
-  "session": "default",
-  "autonomy": 3
-}
-```
-
-Runs one `AgentLoop` turn. Plain messages go through the configured chat
-provider; slash commands such as `/tool file.list path=.` still exercise the
-native tool and permission path directly.
-
-When the configured model provider returns OpenAI-compatible tool calls, Kairos
-executes them through the existing permission-gated `ToolRouter`, writes the
-tool result back into the JSONL session, then calls the model again for the
-final response. Model-visible tool names use OpenAI-safe names such as
-`file__read`; Kairos maps them back to internal names such as `file.read`.
-
-Context handling currently has three MVP layers:
-
-- Level 1: large tool results are replaced with compact placeholders before
-  they are sent back to the model.
-- Level 2: when the model-visible context grows past the local threshold,
-  Kairos asks the provider to summarize older messages and inserts that summary
-  ahead of recent messages.
-- Save layer: user-stated durable facts/preferences and generated context
-  summaries are saved as memory candidates under `.kairos/memory/candidates/`.
-
-The response is optimized for frontend handoff: it keeps the original
-`outbound` and `observations` fields, and also returns the refreshed
-`session`, `messages`, and Inspector `events` for the target session.
-
-```json
-{
-  "outbound": [{"channel": "api", "to": "api-user", "text": "tool file.list: ok"}],
-  "observations": ["tool file.list: ok"],
-  "session": {"id": "default", "title": "Default"},
-  "messages": [],
-  "events": []
-}
-```
-
-Default model mode is local fallback, which is deterministic and does not call
-the network. To connect an OpenAI-compatible chat-completions endpoint, start
-the backend with environment variables:
+To connect an OpenAI-compatible endpoint, configure:
 
 ```text
 KAIROS_LLM_PROVIDER=openai-compatible
-KAIROS_LLM_BASE_URL=https://api.openai.com/v1
+KAIROS_LLM_BASE_URL=https://api.deepseek.com/v1
 KAIROS_LLM_API_KEY=...
-KAIROS_LLM_MODEL=...
-python app.py --root . --host 127.0.0.1 --port 8765
-```
-
-The same settings can be stored in `.env`:
-
-```text
-KAIROS_LLM_PROVIDER=openai-compatible
-KAIROS_LLM_BASE_URL=https://api.openai.com/v1
-KAIROS_LLM_API_KEY=...
-KAIROS_LLM_MODEL=gpt-4.1-mini
+KAIROS_LLM_MODEL=deepseek-chat
 KAIROS_LLM_TIMEOUT=60
 ```
 
-Or in `.kairos/llm.json`, `kairos.llm.json`, or `llm.json`:
-
-```json
-{
-  "provider": "openai-compatible",
-  "base_url": "https://api.openai.com/v1",
-  "api_key": "...",
-  "model": "gpt-4.1-mini",
-  "timeout": 60
-}
-```
-
-Precedence is process environment, then `.env`, then JSON config, then built-in defaults.
-
-## Weekly Review
-
-```text
-POST /api/reviews/weekly
-```
-
-Body:
-
-```json
-{
-  "start_date": "2026-05-10",
-  "end_date": "2026-05-16"
-}
-```
-
-Creates a Markdown weekly review draft from existing daily journals.
-
-The response also returns the generated section bullets for frontend preview:
-
-```json
-{
-  "sections": {
-    "这一周你做了什么": ["2026-05-16: 实现 FastAPI 后端"],
-    "哪些事情给你能量": ["2026-05-16: 架构讨论有能量"],
-    "哪些事情反复消耗你": ["2026-05-16: 前端同步反复消耗"],
-    "下周可以调整什么": ["优先减少反复消耗项，为深度工作留出连续时间。"]
-  }
-}
-```
+Precedence is process environment, `.env`, JSON config, then built-in defaults. When `KAIROS_LLM_PROVIDER=openai-compatible` is explicit and no base URL/model is supplied, Kairos uses DeepSeek-friendly defaults without hard-coding secrets.
 
 ## Capabilities
 
@@ -533,52 +285,8 @@ GET /api/skills
 GET /api/skills/{name}
 ```
 
-Capabilities exposes:
-
-- native tools,
-- skill manifests discovered from `skills/**/SKILL.md` and `.kairos/skills/**/SKILL.md`,
-- MCP/plugin manifests discovered from known local plugin locations.
-
-Native tools now include local-first web/weather/location/memory helpers and
-`meal.recommend`.
-
-`web.search` supports local fixtures and optional HTTP providers:
-
-```text
-KAIROS_WEB_SEARCH_PROVIDER=brave
-KAIROS_BRAVE_SEARCH_API_KEY=...
-
-KAIROS_WEB_SEARCH_PROVIDER=tavily
-KAIROS_TAVILY_API_KEY=...
-
-KAIROS_WEB_SEARCH_URL=http://127.0.0.1:9000/search?q={query_plus}&n={limit}
-```
-
-MCP tools are loaded from `.kairos/mcp.json`, `mcp.json`, or `.mcp.json` when
-present. Runtime names use:
-
-```text
-mcp.{server}.{tool}
-```
-
-Example:
-
-```json
-{
-  "servers": {
-    "local": {
-      "command": "python",
-      "args": ["scripts/my_mcp_server.py"]
-    }
-  }
-}
-```
-
-MCP tools are medium-risk by default and still pass through the shared
-permission layer.
+Capabilities expose native tools, skill manifests, and MCP/plugin manifests. Native tools include file, memory, web/weather/location, meal recommendation, and Todo tools.
 
 ## Static Frontend
 
-`python app.py` also checks common frontend output folders such as `frontend/dist`, `frontend/build`, `web/dist`, `web/build`, and `public`.
-
-If an `index.html` exists there, non-API routes serve the frontend. Otherwise `/` returns a small JSON backend status response.
+`python app.py` checks common frontend output folders such as `frontend/dist`, `frontend/build`, `web/dist`, `web/build`, and `public`. If an `index.html` exists, non-API routes serve the frontend. Otherwise `/` returns a small JSON backend status response.

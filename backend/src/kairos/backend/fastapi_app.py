@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
 from contextlib import asynccontextmanager
+from datetime import date
 import os
 from pathlib import Path
 from typing import Any
@@ -52,6 +52,10 @@ def create_app(root: Path) -> FastAPI:
     @app.get("/api/state")
     def state() -> dict[str, Any]:
         return _backend(app).state()
+
+    @app.get("/api/today")
+    def today() -> dict[str, Any]:
+        return _backend(app).today()
 
     @app.get("/api/doctor")
     def doctor() -> dict[str, Any]:
@@ -106,6 +110,26 @@ def create_app(root: Path) -> FastAPI:
     def journals(limit: int = 30) -> dict[str, Any]:
         return _backend(app).list_journals(limit=limit)
 
+    @app.get("/api/journal/artifacts")
+    def journal_artifacts(type: str | None = None, limit: int = 50) -> dict[str, Any]:
+        return _backend(app).list_journal_artifacts(artifact_type=type, limit=limit)
+
+    @app.get("/api/journal/artifacts/{artifact_id}")
+    def journal_artifact(artifact_id: str) -> dict[str, Any]:
+        return _backend(app).read_journal_artifact(artifact_id)
+
+    @app.post("/api/journal/artifacts")
+    def create_journal_artifact(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).create_journal_artifact(body)
+
+    @app.post("/api/journal/artifacts/update")
+    def update_journal_artifact(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).update_journal_artifact(_body_id(body, "artifact_id"), body)
+
+    @app.post("/api/journal/artifacts/delete")
+    def delete_journal_artifact(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).delete_journal_artifact(_body_id(body, "artifact_id"))
+
     @app.get("/api/journal")
     def journal(date: str | None = None) -> dict[str, Any]:
         return _backend(app).read_journal(_parse_date(date))
@@ -133,6 +157,42 @@ def create_app(root: Path) -> FastAPI:
             heading=str(body.get("heading", "有价值的对话")),
             include_roles=body.get("include_roles"),
         )
+
+    @app.get("/api/todos")
+    def todos(status: str | None = None, list_id: str | None = None) -> dict[str, Any]:
+        return _backend(app).list_todos(status=status, list_id=list_id)
+
+    @app.post("/api/todos")
+    def create_todo(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).create_todo(body)
+
+    @app.post("/api/todos/update")
+    def update_todo(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).update_todo(_body_id(body, "todo_id"), body)
+
+    @app.post("/api/todos/delete")
+    def delete_todo(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).delete_todo(_body_id(body, "todo_id"))
+
+    @app.post("/api/todos/complete")
+    def complete_todo(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).complete_todo(_body_id(body, "todo_id"))
+
+    @app.get("/api/todo-lists")
+    def todo_lists() -> dict[str, Any]:
+        return _backend(app).list_todo_lists()
+
+    @app.post("/api/todo-lists")
+    def create_todo_list(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).create_todo_list(body)
+
+    @app.post("/api/todo-lists/update")
+    def update_todo_list(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).update_todo_list(_body_id(body, "list_id"), body)
+
+    @app.post("/api/todo-lists/delete")
+    def delete_todo_list(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).delete_todo_list(_body_id(body, "list_id"))
 
     @app.get("/api/memories")
     def memories(include_candidates: bool = False) -> dict[str, Any]:
@@ -298,6 +358,13 @@ def _parse_datetime(raw: object | None):
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _body_id(body: dict[str, Any], alias: str) -> str:
+    value = body.get("id", body.get(alias, ""))
+    if not value:
+        raise ValueError("id is required")
+    return str(value)
 
 
 def _static_root(root: Path) -> Path | None:

@@ -63,6 +63,14 @@ def test_llm_provider_loads_json_and_dotenv_config(tmp_path: Path) -> None:
     assert provider.timeout_seconds == 9
 
 
+def test_llm_provider_uses_deepseek_defaults_when_explicitly_configured(tmp_path: Path) -> None:
+    provider = provider_from_env(root=tmp_path, environ={"KAIROS_LLM_PROVIDER": "openai-compatible"})
+
+    assert provider.name == "openai-compatible"
+    assert provider.base_url == "https://api.deepseek.com/v1"
+    assert provider.model == "deepseek-chat"
+
+
 def test_tool_router_allows_low_risk_and_audits(tmp_path: Path) -> None:
     paths = KairosPaths.from_root(tmp_path)
     ensure_workspace(paths)
@@ -77,6 +85,35 @@ def test_tool_router_allows_low_risk_and_audits(tmp_path: Path) -> None:
 
     assert result.status == "ok"
     assert (paths.audit / "tool-calls.jsonl").exists()
+
+
+def test_todo_tools_use_permission_and_audit_pipeline(tmp_path: Path) -> None:
+    paths = KairosPaths.from_root(tmp_path)
+    ensure_workspace(paths)
+    registry = build_native_registry(paths)
+    low_router = ToolRouter(
+        registry,
+        PermissionManager(AutonomyLevel.LOW_RISK_AUTO),
+        AuditLogger(paths),
+    )
+
+    proposal = low_router.call("todo.propose", {"title": "确认明天提交"})
+    blocked_create = low_router.call("todo.create", {"title": "可靠提醒", "source": "chat"})
+
+    approved_router = ToolRouter(
+        registry,
+        PermissionManager(AutonomyLevel.APPROVED_SCOPE_AUTO),
+        AuditLogger(paths),
+    )
+    created = approved_router.call("todo.create", {"title": "可靠提醒", "source": "chat"})
+
+    audit = (paths.audit / "tool-calls.jsonl").read_text(encoding="utf-8")
+    assert proposal.status == "ok"
+    assert proposal.data["proposed"] is True
+    assert blocked_create.status == "blocked"
+    assert created.status == "ok"
+    assert created.data["todo"]["title"] == "可靠提醒"
+    assert "tool:todo.create" in audit
 
 
 def test_advanced_tools_search_memory_and_environment_context(tmp_path: Path, monkeypatch) -> None:

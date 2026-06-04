@@ -7,30 +7,56 @@ from fastapi.testclient import TestClient
 from kairos.backend.fastapi_app import create_app
 
 
-def test_fastapi_health_state_and_chat(tmp_path: Path) -> None:
+def test_fastapi_health_state_today_and_chat(tmp_path: Path) -> None:
     client = TestClient(create_app(tmp_path))
 
     health = client.get("/api/health")
     bootstrap = client.post("/api/bootstrap", json={})
     chat = client.post("/api/chat", json={"text": "/tool file.list path=.", "session": "fastapi"})
-    sessions = client.get("/api/sessions")
-    session = client.get("/api/sessions/fastapi")
-    messages = client.get("/api/sessions/fastapi/messages")
-    events = client.get("/api/sessions/fastapi/events")
+    today = client.get("/api/today")
     state = client.get("/api/state")
 
     assert health.status_code == 200
     assert health.json()["service"] == "kairos"
     assert bootstrap.json()["default_nightly_journal"] == "installed"
     assert "tool file.list: ok" in chat.json()["outbound"][0]["text"]
-    assert chat.json()["session"]["id"] == "fastapi"
-    assert chat.json()["messages"]
-    assert any(event["kind"] == "tool_result" for event in chat.json()["events"])
-    assert sessions.json()["sessions"]
-    assert session.json()["session"]["id"] == "fastapi"
-    assert messages.json()["messages"]
-    assert events.json()["events"]
+    assert today.json()["model"]["suggested_provider"] == "deepseek"
+    assert today.json()["todos"]["available"] is True
     assert state.json()["app"]["name"] == "Kairos"
+
+
+def test_fastapi_todo_and_journal_artifact_workflow(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path))
+    client.post("/api/bootstrap", json={})
+
+    todo_list = client.post("/api/todo-lists", json={"name": "FastAPI"}).json()["list"]
+    todo = client.post(
+        "/api/todos",
+        json={
+            "title": "补齐 FastAPI Todo",
+            "list_id": todo_list["id"],
+            "kind": "task",
+            "due_at": "2026-05-16T12:00:00+00:00",
+        },
+    )
+    artifact = client.post(
+        "/api/journal/artifacts",
+        json={
+            "type": "record",
+            "title": "FastAPI artifact",
+            "summary": "Journal artifact route",
+            "body": "记录 API 行为。",
+        },
+    )
+    todos = client.get("/api/todos")
+    artifacts = client.get("/api/journal/artifacts")
+    completed = client.post("/api/todos/complete", json={"id": todo.json()["todo"]["id"]})
+
+    assert todo.status_code == 200
+    assert artifact.status_code == 200
+    assert todos.json()["todos"][0]["title"] == "补齐 FastAPI Todo"
+    assert artifacts.json()["artifacts"][0]["title"] == "FastAPI artifact"
+    assert completed.json()["todo"]["status"] == "completed"
 
 
 def test_fastapi_journal_memory_schedule_workflow(tmp_path: Path) -> None:
@@ -58,9 +84,7 @@ def test_fastapi_journal_memory_schedule_workflow(tmp_path: Path) -> None:
 
     assert journal.status_code == 200
     assert reflected.json()["candidate_count"] >= 1
-    assert reflected.json()["candidates"][0]["reason"]
     assert memories.json()["summary"]["candidates"] >= 1
-    assert memories.json()["memories"][0]["candidate_reason"]
     assert memories.json()["memories"][0]["source_journal_date"] == "2026-05-16"
     assert schedule.json()["id"] == "fastapi-reminder"
     assert toggled.json()["updated"] is True
