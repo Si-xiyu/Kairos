@@ -12,6 +12,10 @@ ArtifactType = Literal["diary", "record"]
 SourceKind = Literal["chat", "manual", "import", "kairos"]
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @dataclass(frozen=True)
 class JournalArtifact:
     id: str
@@ -269,10 +273,6 @@ def _slug(value: str) -> str:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex[:12]}"
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _preview(body: str, limit: int = 180) -> str:

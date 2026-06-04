@@ -16,6 +16,10 @@ TodoSource = Literal["manual", "kairos", "chat"]
 DEFAULT_LIST_ID = "inbox"
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @dataclass(frozen=True)
 class TodoList:
     id: str
@@ -236,10 +240,6 @@ def proposed_todo(values: dict[str, Any]) -> dict[str, Any]:
             "updated_at": now,
         },
     }
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _new_id(prefix: str) -> str:
