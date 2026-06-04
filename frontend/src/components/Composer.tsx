@@ -3,12 +3,13 @@ import { KeyboardEvent } from "react";
 type Props = {
   value: string;
   isGenerating: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
 };
 
-export function Composer({ value, isGenerating, onChange, onSend, onStop }: Props) {
+export function Composer({ value, isGenerating, placeholder, onChange, onSend, onStop }: Props) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -23,7 +24,7 @@ export function Composer({ value, isGenerating, onChange, onSend, onStop }: Prop
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Kairos to inspect, plan, code, remember, or reflect..."
+          placeholder={placeholder ?? "Ask Kairos to inspect, plan, code, remember, or reflect..."}
           rows={3}
         />
         <div className="composer-actions">
