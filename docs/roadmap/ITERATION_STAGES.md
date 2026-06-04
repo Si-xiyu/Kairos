@@ -1,5 +1,7 @@
 # Kairos Iteration Stages
 
+> Current product direction has been reset in [../product/PRODUCT_TECHNICAL_PLAN.md](../product/PRODUCT_TECHNICAL_PLAN.md). Kairos is now defined as a local-first personal work/life operating console with a ChatGPT-like desktop app experience; coding agent behavior is a strong local file-work mode inside project scopes, not the primary product identity.
+
 This roadmap splits the next product rounds into commit-sized stages. Each completed stage should be tested and committed before moving on, so parallel agents can sync at precise version boundaries.
 
 ## Target Product Build Path

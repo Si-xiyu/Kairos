@@ -1,17 +1,24 @@
 ﻿# Kairos 并行实现总控计划
 
-本文档用于三路并行开发：
+本文档最初用于三路并行开发；当前产品方向已经重置为 `docs/product/PRODUCT_TECHNICAL_PLAN.md` 中定义的本地优先个人工作/生活操作台。新的并行实现应优先使用前后端 agent 分工：
 
-- Commander：当前主 worktree，负责主干骨架、公共接口、最终合并和冲突裁决。
-- Claude Code：负责 Memory System 与 Life Log System。
-- Codex Worker：负责 Presence Engine、Channel Gateway 与 Delivery Queue。
+- Backend Agent：负责 FastAPI、本地存储、Todo/Journal/Today API、工具权限管道与 DeepSeek/OpenAI-compatible provider 配置。
+- Frontend Agent：负责 React/Vite 桌面式 app shell、Today View、Todo、Journal、Project Scopes、Settings 与 contextual chat sidebar。
+- Commander：负责主干方向、公共接口、最终合并和冲突裁决。
 
 所有实例都必须先阅读：
 
-1. `TECHNICAL_REQUIREMENTS.md`
-2. `AGENTS.md`
+1. `CONTEXT.md`
+2. `docs/product/PRODUCT_TECHNICAL_PLAN.md`
 3. 本文档
 4. 自己的任务简报
+
+当前任务简报：
+
+```text
+docs/parallel/BACKEND_AGENT_PROMPT.md
+docs/parallel/FRONTEND_AGENT_PROMPT.md
+```
 
 ## 当前主干状态
 
@@ -74,6 +81,28 @@ scripts/**
 如果 worker 必须修改上述文件，应在最终报告中明确说明原因和建议 diff，而不是直接大改。
 
 ## Worker 任务分配
+
+### Product Reset Round
+
+Backend Agent 任务文件：
+
+```text
+docs/parallel/BACKEND_AGENT_PROMPT.md
+```
+
+Frontend Agent 任务文件：
+
+```text
+docs/parallel/FRONTEND_AGENT_PROMPT.md
+```
+
+建议顺序：
+
+1. Backend Agent 先补稳定 API：Today、Todo、Journal artifact foundation、DeepSeek-oriented provider defaults。
+2. Frontend Agent 可并行做 app shell 和受控 fallback，但不要把 mock 数据散落在组件里。
+3. Commander 合并时优先检查 API contract 是否与 `docs/api/BACKEND_API.md` 和 frontend adapter 一致。
+4. 前端发现缺口时在最终报告写 `Backend contract gaps`，不要直接大改后端。
+5. 后端发现前端需要调整时在最终报告写 `Frontend contract notes`，不要直接大改前端。
 
 ### Round 2
 
