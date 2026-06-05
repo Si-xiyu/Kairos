@@ -64,6 +64,58 @@ type JournalArtifactResponse = {
   artifact: JournalArtifact;
 };
 
+type BackendJournalArtifactSummary = {
+  id: string;
+  type?: JournalArtifactKind;
+  kind?: JournalArtifactKind;
+  title: string;
+  date?: string | null;
+  path?: string;
+  preview?: string;
+  tags?: string[];
+  updated_at?: string;
+  updatedAt?: string;
+  source?: string | { kind?: string; session_id?: string | null };
+  legacy?: boolean;
+  summary?: string | null;
+};
+
+type BackendJournalArtifact = BackendJournalArtifactSummary & {
+  body?: string;
+  content?: string;
+  exists?: boolean;
+};
+
+type BackendJournalArtifactsResponse = {
+  artifacts: BackendJournalArtifactSummary[];
+};
+
+type BackendJournalArtifactResponse = {
+  artifact: BackendJournalArtifact;
+};
+
+type BackendSettingsResponse = {
+  llm?: {
+    provider?: string;
+    suggested_provider?: string;
+    base_url?: string | null;
+    model?: string;
+    api_key_configured?: boolean;
+  };
+  storage?: {
+    kairos_home?: string;
+    journal_path?: string;
+    record_path?: string;
+  };
+  notifications?: {
+    enabled?: boolean;
+    quiet_hours_start?: string;
+    quiet_hours_end?: string;
+    daily_notification_budget?: number;
+    default_channel?: string;
+  };
+};
+
 type ApiRequestInit = {
   method?: string;
   body?: unknown;
@@ -152,21 +204,21 @@ export async function saveJournal(date: string, content: string): Promise<Journa
 }
 
 export async function listJournalArtifacts(kind: JournalArtifactKind): Promise<JournalArtifactSummary[]> {
-  const response = await request<JournalArtifactsResponse>(`/api/journal-artifacts?kind=${encodeURIComponent(kind)}`);
-  return response.artifacts;
+  const response = await request<BackendJournalArtifactsResponse>(`/api/journal/artifacts?type=${encodeURIComponent(kind)}`);
+  return response.artifacts.map(normalizeJournalArtifactSummary);
 }
 
 export async function readJournalArtifact(id: string): Promise<JournalArtifact> {
-  const response = await request<JournalArtifactResponse>(`/api/journal-artifacts/${encodeURIComponent(id)}`);
-  return response.artifact;
+  const response = await request<BackendJournalArtifactResponse>(`/api/journal/artifacts/${encodeURIComponent(id)}`);
+  return normalizeJournalArtifact(response.artifact);
 }
 
 export async function saveJournalArtifact(artifact: JournalArtifact): Promise<JournalArtifact> {
-  const response = await request<JournalArtifactResponse>("/api/journal-artifacts/update", {
+  const response = await request<BackendJournalArtifactResponse>("/api/journal/artifacts/update", {
     method: "POST",
-    body: artifact,
+    body: journalArtifactPayload(artifact),
   });
-  return response.artifact;
+  return normalizeJournalArtifact(response.artifact);
 }
 
 export async function createJournalArtifact(input: {
@@ -176,11 +228,17 @@ export async function createJournalArtifact(input: {
   tags: string[];
   date?: string;
 }): Promise<JournalArtifact> {
-  const response = await request<JournalArtifactResponse>("/api/journal-artifacts", {
+  const response = await request<BackendJournalArtifactResponse>("/api/journal/artifacts", {
     method: "POST",
-    body: input,
+    body: {
+      type: input.kind,
+      title: input.title,
+      body: input.content,
+      tags: input.tags,
+      date: input.date,
+    },
   });
-  return response.artifact;
+  return normalizeJournalArtifact(response.artifact);
 }
 
 export async function listTodoData(): Promise<TodoData> {
@@ -272,7 +330,7 @@ export async function deleteProjectScope(id: string): Promise<void> {
 
 export async function getSettingsSummary(appState?: AppState): Promise<SettingsSummary> {
   try {
-    return await request<SettingsSummary>("/api/settings");
+    return normalizeSettings(await request<BackendSettingsResponse>("/api/settings"));
   } catch (error) {
     return {
       provider: "DeepSeek",
@@ -289,10 +347,24 @@ export async function getSettingsSummary(appState?: AppState): Promise<SettingsS
 }
 
 export async function saveSettings(settings: SettingsSummary & { apiKey?: string }): Promise<SettingsSummary> {
-  return request<SettingsSummary>("/api/settings", {
+  const response = await request<BackendSettingsResponse>("/api/settings", {
     method: "POST",
-    body: settings,
+    body: {
+      llm: {
+        provider: "openai-compatible",
+        base_url: settings.baseUrl,
+        model: settings.model,
+        api_key: settings.apiKey,
+      },
+      storage: {
+        journal_path: settings.storagePath,
+      },
+      notifications: {
+        enabled: settings.notifications !== "disabled",
+      },
+    },
   });
+  return normalizeSettings(response);
 }
 
 async function requestOptional<T>(path: string, init: ApiRequestInit = {}): Promise<T | undefined> {
@@ -337,4 +409,72 @@ function apiErrorMessage(error: unknown, fallback: string): string {
     return `${fallback} ${error.message}`;
   }
   return fallback;
+}
+
+function normalizeJournalArtifactSummary(raw: BackendJournalArtifactSummary): JournalArtifactSummary {
+  return {
+    id: raw.id,
+    kind: raw.kind ?? raw.type ?? "record",
+    title: raw.title,
+    date: raw.date ?? undefined,
+    path: raw.path,
+    preview: raw.preview,
+    tags: raw.tags ?? [],
+    updatedAt: raw.updatedAt ?? raw.updated_at,
+    source: sourceLabel(raw.source),
+    legacy: raw.legacy,
+  };
+}
+
+function normalizeJournalArtifact(raw: BackendJournalArtifact): JournalArtifact {
+  return {
+    ...normalizeJournalArtifactSummary(raw),
+    content: raw.content ?? raw.body ?? "",
+    exists: raw.exists,
+  };
+}
+
+function journalArtifactPayload(artifact: JournalArtifact): Record<string, unknown> {
+  return {
+    artifact_id: artifact.id,
+    type: artifact.kind,
+    title: artifact.title,
+    body: artifact.content,
+    tags: artifact.tags,
+    date: artifact.date,
+  };
+}
+
+function sourceLabel(source: BackendJournalArtifactSummary["source"]): string | undefined {
+  if (!source) {
+    return undefined;
+  }
+  if (typeof source === "string") {
+    return source;
+  }
+  return [source.kind, source.session_id].filter(Boolean).join(":") || undefined;
+}
+
+function normalizeSettings(raw: BackendSettingsResponse): SettingsSummary {
+  const llm = raw.llm ?? {};
+  const storage = raw.storage ?? {};
+  const notifications = raw.notifications ?? {};
+  return {
+    provider: llm.suggested_provider === "deepseek" ? "DeepSeek" : (llm.provider ?? "local"),
+    baseUrl: llm.base_url ?? "",
+    model: llm.model ?? "",
+    apiKeyConfigured: llm.api_key_configured ?? false,
+    storagePath: storage.journal_path ?? storage.kairos_home,
+    notifications: notifications.enabled === false ? "disabled" : "enabled",
+    notificationPolicy: [
+      notifications.quiet_hours_start && notifications.quiet_hours_end
+        ? `${notifications.quiet_hours_start}-${notifications.quiet_hours_end}`
+        : "",
+      notifications.daily_notification_budget !== undefined
+        ? `${notifications.daily_notification_budget}/day`
+        : "",
+      notifications.default_channel,
+    ].filter(Boolean).join(" | "),
+    memoryPath: storage.kairos_home ? `${storage.kairos_home}\\memory` : undefined,
+  };
 }
