@@ -447,6 +447,7 @@ code {
 }
 
 .field input,
+.field textarea,
 .field select,
 .search-box input,
 .composer textarea {
@@ -456,6 +457,12 @@ code {
   background: var(--surface-strong);
   color: var(--text);
   padding: 9px 10px;
+}
+
+.field textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .field-row {
@@ -475,6 +482,7 @@ code {
 
 .segmented-control {
   display: inline-flex;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-muted);
@@ -496,8 +504,15 @@ code {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+.wrap-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
 .primary-control,
 .secondary-control,
+.danger-control,
 .icon-button {
   border-radius: var(--radius);
   font-weight: 700;
@@ -516,6 +531,76 @@ code {
   background: var(--surface-muted);
   color: var(--text);
   padding: 0 12px;
+}
+
+.danger-control {
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, var(--danger), transparent 55%);
+  background: color-mix(in srgb, var(--surface), var(--danger) 8%);
+  color: var(--danger);
+  padding: 0 12px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.todo-group {
+  display: grid;
+  gap: 8px;
+}
+
+.todo-group h4 {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.todo-item {
+  gap: 8px;
+}
+
+.todo-item.is-complete {
+  opacity: 0.72;
+}
+
+.todo-item p {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.todo-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.todo-check input {
+  margin-top: 3px;
+}
+
+.todo-check span,
+.todo-check small {
+  display: grid;
+  min-width: 0;
+}
+
+.todo-check small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .icon-button {
@@ -574,8 +659,15 @@ code {
 
 .journal-editor {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
   padding: 14px;
+}
+
+.journal-meta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  gap: 10px;
 }
 
 .markdown-editor {
@@ -589,6 +681,54 @@ code {
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.markdown-preview {
+  min-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  padding: 16px;
+  line-height: 1.55;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview p {
+  margin: 0 0 10px;
+}
+
+.markdown-preview h1 {
+  font-size: 22px;
+}
+
+.markdown-preview h2 {
+  font-size: 17px;
+}
+
+.scope-item {
+  gap: 10px;
+}
+
+.permission-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .settings-grid {
@@ -1024,6 +1164,7 @@ code {
 @media (max-width: 940px) {
   .desktop-shell {
     grid-template-columns: 168px minmax(0, 1fr);
+    min-height: 620px;
   }
 
   .context-chat {
@@ -1036,6 +1177,11 @@ code {
 
   .journal-layout,
   .chat-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .journal-meta-grid,
+  .inline-form {
     grid-template-columns: 1fr;
   }
 }
@@ -1081,7 +1227,16 @@ code {
 
   .metric-row,
   .field-row,
+  .journal-meta-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .segmented-control {
+    width: 100%;
+  }
+
+  .segmented-control button {
+    flex: 1 1 auto;
   }
 }

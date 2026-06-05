@@ -4,14 +4,20 @@ import type {
   BackendHealth,
   ChatResponse,
   DaemonStatus,
+  JournalArtifact,
+  JournalArtifactKind,
+  JournalArtifactSummary,
   JournalDocument,
   JournalSummary,
   Message,
   ProjectScopeData,
+  ProjectScope,
   Session,
   SettingsSummary,
   Todo,
   TodoData,
+  TodoList,
+  TodayData,
 } from "../types";
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8765";
@@ -46,6 +52,18 @@ type TodosResponse = {
   todos: Todo[];
 };
 
+type TodoListsResponse = {
+  lists: TodoList[];
+};
+
+type JournalArtifactsResponse = {
+  artifacts: JournalArtifactSummary[];
+};
+
+type JournalArtifactResponse = {
+  artifact: JournalArtifact;
+};
+
 type ApiRequestInit = {
   method?: string;
   body?: unknown;
@@ -77,6 +95,10 @@ export async function getAppState(): Promise<AppState> {
 
 export async function getDaemonStatus(): Promise<DaemonStatus | undefined> {
   return requestOptional<DaemonStatus>("/api/daemon/status");
+}
+
+export async function getToday(): Promise<TodayData> {
+  return request<TodayData>("/api/today");
 }
 
 export async function listSessions(): Promise<Session[]> {
@@ -129,49 +151,148 @@ export async function saveJournal(date: string, content: string): Promise<Journa
   });
 }
 
+export async function listJournalArtifacts(kind: JournalArtifactKind): Promise<JournalArtifactSummary[]> {
+  const response = await request<JournalArtifactsResponse>(`/api/journal-artifacts?kind=${encodeURIComponent(kind)}`);
+  return response.artifacts;
+}
+
+export async function readJournalArtifact(id: string): Promise<JournalArtifact> {
+  const response = await request<JournalArtifactResponse>(`/api/journal-artifacts/${encodeURIComponent(id)}`);
+  return response.artifact;
+}
+
+export async function saveJournalArtifact(artifact: JournalArtifact): Promise<JournalArtifact> {
+  const response = await request<JournalArtifactResponse>("/api/journal-artifacts/update", {
+    method: "POST",
+    body: artifact,
+  });
+  return response.artifact;
+}
+
+export async function createJournalArtifact(input: {
+  kind: JournalArtifactKind;
+  title: string;
+  content: string;
+  tags: string[];
+  date?: string;
+}): Promise<JournalArtifact> {
+  const response = await request<JournalArtifactResponse>("/api/journal-artifacts", {
+    method: "POST",
+    body: input,
+  });
+  return response.artifact;
+}
+
 export async function listTodoData(): Promise<TodoData> {
-  const response = await requestOptional<TodosResponse>("/api/todos");
-  if (!response) {
+  try {
+    const [todosResponse, listsResponse] = await Promise.all([
+      request<TodosResponse>("/api/todos"),
+      request<TodoListsResponse>("/api/todo-lists"),
+    ]);
+    return { todos: todosResponse.todos, lists: listsResponse.lists };
+  } catch (error) {
     return {
       todos: [],
       lists: [],
-      contractGap:
-        "Missing backend endpoints: GET /api/todos, POST /api/todos, POST /api/todos/update, POST /api/todos/delete, POST /api/todos/complete, and Todo List CRUD.",
+      error: apiErrorMessage(
+        error,
+        "Todo API unavailable. Expected GET /api/todos and GET /api/todo-lists.",
+      ),
     };
   }
-  return { todos: response.todos, lists: [] };
 }
 
-export async function createTodo(_todo: Omit<Todo, "id" | "completed">): Promise<never> {
-  throw new Error("Todo persistence is pending backend Todo CRUD endpoints.");
+export async function createTodo(todo: Omit<Todo, "id" | "completed">): Promise<Todo> {
+  const response = await request<{ todo: Todo }>("/api/todos", {
+    method: "POST",
+    body: todo,
+  });
+  return response.todo;
+}
+
+export async function updateTodo(todo: Todo): Promise<Todo> {
+  const response = await request<{ todo: Todo }>("/api/todos/update", {
+    method: "POST",
+    body: todo,
+  });
+  return response.todo;
+}
+
+export async function deleteTodo(id: string): Promise<void> {
+  await request("/api/todos/delete", {
+    method: "POST",
+    body: { id },
+  });
+}
+
+export async function completeTodo(id: string, completed: boolean): Promise<Todo> {
+  const response = await request<{ todo: Todo }>("/api/todos/complete", {
+    method: "POST",
+    body: { id, completed },
+  });
+  return response.todo;
 }
 
 export async function listProjectScopes(): Promise<ProjectScopeData> {
-  const response = await requestOptional<ProjectScopeData>("/api/project-scopes");
-  if (!response) {
+  try {
+    return await request<ProjectScopeData>("/api/project-scopes");
+  } catch (error) {
     return {
       scopes: [],
-      contractGap:
-        "Missing backend endpoints: GET /api/project-scopes plus create, update, remove, and permission-summary routes.",
+      error: apiErrorMessage(
+        error,
+        "Project Scope API unavailable. Expected GET /api/project-scopes plus create, update, delete, and disable routes.",
+      ),
     };
   }
-  return response;
+}
+
+export async function createProjectScope(path: string): Promise<ProjectScope> {
+  const response = await request<{ scope: ProjectScope }>("/api/project-scopes", {
+    method: "POST",
+    body: { path },
+  });
+  return response.scope;
+}
+
+export async function updateProjectScope(scope: ProjectScope): Promise<ProjectScope> {
+  const response = await request<{ scope: ProjectScope }>("/api/project-scopes/update", {
+    method: "POST",
+    body: scope,
+  });
+  return response.scope;
+}
+
+export async function deleteProjectScope(id: string): Promise<void> {
+  await request("/api/project-scopes/delete", {
+    method: "POST",
+    body: { id },
+  });
 }
 
 export async function getSettingsSummary(appState?: AppState): Promise<SettingsSummary> {
-  const response = await requestOptional<SettingsSummary>("/api/settings");
-  if (response) {
-    return response;
+  try {
+    return await request<SettingsSummary>("/api/settings");
+  } catch (error) {
+    return {
+      provider: "DeepSeek",
+      baseUrl: "",
+      model: "",
+      apiKeyConfigured: false,
+      storagePath: appState?.doctor.kairos_home,
+      notifications: "pending",
+      notificationPolicy: "",
+      memoryPath: appState?.doctor.kairos_home ? `${appState.doctor.kairos_home}\\memory` : undefined,
+      error: apiErrorMessage(error, "Settings API unavailable. Expected GET /api/settings and POST /api/settings."),
+    };
   }
-  return {
-    provider: "DeepSeek target via OpenAI-compatible provider",
-    baseUrl: "Configured in backend environment or llm.json",
-    model: "Backend default",
-    storagePath: appState?.doctor.kairos_home,
-    notifications: "pending",
-    contractGap:
-      "Missing backend settings endpoint for model provider, secrets, storage, notification policy, memory, project scopes, and provider configuration.",
-  };
+}
+
+export async function saveSettings(settings: SettingsSummary & { apiKey?: string }): Promise<SettingsSummary> {
+  return request<SettingsSummary>("/api/settings", {
+    method: "POST",
+    body: settings,
+  });
 }
 
 async function requestOptional<T>(path: string, init: ApiRequestInit = {}): Promise<T | undefined> {
@@ -206,4 +327,14 @@ async function request<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
   }
 
   return payload as T;
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return `${fallback} Backend returned ${error.status}: ${error.message}`;
+  }
+  if (error instanceof Error) {
+    return `${fallback} ${error.message}`;
+  }
+  return fallback;
 }

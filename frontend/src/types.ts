@@ -81,6 +81,26 @@ export type JournalDocument = {
   content: string;
 };
 
+export type JournalArtifactKind = "diary" | "record";
+
+export type JournalArtifactSummary = {
+  id: string;
+  kind: JournalArtifactKind;
+  title: string;
+  date?: string;
+  path?: string;
+  preview?: string;
+  tags: string[];
+  updatedAt?: string;
+  source?: string;
+  legacy?: boolean;
+};
+
+export type JournalArtifact = JournalArtifactSummary & {
+  content: string;
+  exists?: boolean;
+};
+
 export type ScheduleItem = {
   id: string;
   name: string;
@@ -171,7 +191,29 @@ export type TodoList = {
 export type TodoData = {
   todos: Todo[];
   lists: TodoList[];
-  contractGap?: string;
+  error?: string;
+};
+
+export type TodayData = {
+  date: string;
+  todos: Todo[];
+  journalArtifacts: JournalArtifactSummary[];
+  daemon?: DaemonStatus;
+  model?: {
+    provider?: string;
+    model?: string;
+    status?: string;
+  };
+  pendingApprovals: Array<{
+    id: string;
+    title: string;
+    summary?: string;
+    risk?: string;
+    createdAt?: string;
+  }>;
+  recentSessions: Session[];
+  companionNudge?: string;
+  error?: string;
 };
 
 export type ProjectScope = {
@@ -183,18 +225,22 @@ export type ProjectScope = {
     write: boolean;
     command: boolean;
   };
+  enabled?: boolean;
 };
 
 export type ProjectScopeData = {
   scopes: ProjectScope[];
-  contractGap?: string;
+  error?: string;
 };
 
 export type SettingsSummary = {
   provider: string;
   baseUrl: string;
   model: string;
+  apiKeyConfigured?: boolean;
   storagePath?: string;
-  notifications: "pending" | "enabled" | "disabled";
-  contractGap?: string;
+  notifications: "pending" | "enabled" | "disabled" | string;
+  notificationPolicy?: string;
+  memoryPath?: string;
+  error?: string;
 };
