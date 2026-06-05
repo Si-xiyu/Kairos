@@ -59,6 +59,49 @@ def test_fastapi_todo_and_journal_artifact_workflow(tmp_path: Path) -> None:
     assert completed.json()["todo"]["status"] == "completed"
 
 
+def test_fastapi_settings_project_scopes_approvals_and_capture(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path))
+    client.post("/api/bootstrap", json={})
+
+    settings = client.post(
+        "/api/settings",
+        json={
+            "llm": {
+                "provider": "openai-compatible",
+                "api_key": "secret-key",
+                "model": "deepseek-chat",
+            }
+        },
+    )
+    scope = client.post(
+        "/api/project-scopes",
+        json={"name": "Root", "path": ".", "permissions": {"read": True, "write": True}},
+    )
+    proposed = client.post(
+        "/api/chat",
+        json={
+            "text": '/tool todo.propose title="Review proposal" remind_at=2026-01-01T09:00:00+00:00 reminder_level=high source=chat',
+            "autonomy": 3,
+        },
+    )
+    approvals = client.get("/api/approvals", params={"status": "pending"})
+    approved = client.post("/api/approvals/approve", json={"id": approvals.json()["actions"][0]["id"]})
+    capture = client.post(
+        "/api/journal/capture",
+        json={"type": "record", "title": "API capture", "text": "Discussed API capture.\nTodo: inspect Journal."},
+    )
+    today = client.get("/api/today")
+
+    assert settings.status_code == 200
+    assert settings.json()["llm"]["api_key_configured"] is True
+    assert "secret-key" not in settings.text
+    assert scope.json()["scope"]["permission_summary"] == "read, write"
+    assert "waiting for confirmation" in proposed.json()["outbound"][0]["text"]
+    assert approved.json()["result"]["todo"]["title"] == "Review proposal"
+    assert capture.json()["message"] == "已加入记录"
+    assert today.json()["approvals"]["available"] is True
+
+
 def test_fastapi_journal_memory_schedule_workflow(tmp_path: Path) -> None:
     client = TestClient(create_app(tmp_path))
     client.post("/api/bootstrap", json={})

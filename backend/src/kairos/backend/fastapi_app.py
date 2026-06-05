@@ -65,6 +65,42 @@ def create_app(root: Path) -> FastAPI:
     def capabilities() -> dict[str, Any]:
         return _backend(app).capabilities()
 
+    @app.get("/api/settings")
+    def settings() -> dict[str, Any]:
+        return _backend(app).settings()
+
+    @app.post("/api/settings")
+    def update_settings(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).update_settings(body)
+
+    @app.get("/api/project-scopes")
+    def project_scopes() -> dict[str, Any]:
+        return _backend(app).list_project_scopes()
+
+    @app.post("/api/project-scopes")
+    def create_project_scope(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).create_project_scope(body)
+
+    @app.post("/api/project-scopes/update")
+    def update_project_scope(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).update_project_scope(_body_id(body, "scope_id"), body)
+
+    @app.post("/api/project-scopes/delete")
+    def delete_project_scope(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).delete_project_scope(_body_id(body, "scope_id"))
+
+    @app.get("/api/approvals")
+    def approvals(status: str | None = None) -> dict[str, Any]:
+        return _backend(app).list_approvals(status=status)
+
+    @app.post("/api/approvals/approve")
+    def approve_action(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).approve_action(_body_id(body, "approval_id"))
+
+    @app.post("/api/approvals/reject")
+    def reject_action(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).reject_action(_body_id(body, "approval_id"))
+
     @app.get("/api/skills")
     def skills() -> dict[str, Any]:
         return _backend(app).list_skills()
@@ -156,7 +192,12 @@ def create_app(root: Path) -> FastAPI:
             journal_date=_parse_date(body.get("date")),
             heading=str(body.get("heading", "有价值的对话")),
             include_roles=body.get("include_roles"),
+            artifact_type=str(body.get("type", body.get("artifact_type", "diary"))),
         )
+
+    @app.post("/api/journal/capture")
+    def journal_capture(body: dict[str, Any]) -> dict[str, Any]:
+        return _backend(app).journal_capture(body)
 
     @app.get("/api/todos")
     def todos(status: str | None = None, list_id: str | None = None) -> dict[str, Any]:

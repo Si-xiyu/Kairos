@@ -37,6 +37,8 @@ class Todo:
     reminder_level: ReminderLevel = "normal"
     source: TodoSource = "manual"
     source_ref: str | None = None
+    reminder_delivery_id: str | None = None
+    reminder_delivered_at: str | None = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
@@ -83,6 +85,8 @@ class TodoStore:
             ),
             source=_literal(values.get("source", "manual"), {"manual", "kairos", "chat"}, "source"),
             source_ref=_optional_str(values.get("source_ref")),
+            reminder_delivery_id=_optional_str(values.get("reminder_delivery_id")),
+            reminder_delivered_at=_optional_iso(values.get("reminder_delivered_at")),
             created_at=now,
             updated_at=now,
         )
@@ -108,6 +112,8 @@ class TodoStore:
             "reminder_level",
             "source",
             "source_ref",
+            "reminder_delivery_id",
+            "reminder_delivered_at",
         ):
             if key in values:
                 updated[key] = values[key]
@@ -123,6 +129,8 @@ class TodoStore:
         updated["due_at"] = _optional_iso(updated.get("due_at"))
         updated["remind_at"] = _optional_iso(updated.get("remind_at"))
         updated["source_ref"] = _optional_str(updated.get("source_ref"))
+        updated["reminder_delivery_id"] = _optional_str(updated.get("reminder_delivery_id"))
+        updated["reminder_delivered_at"] = _optional_iso(updated.get("reminder_delivered_at"))
         updated["updated_at"] = _now()
         self._ensure_list(data, str(updated["list_id"]))
         todo.update(updated)
@@ -232,6 +240,8 @@ def proposed_todo(values: dict[str, Any]) -> dict[str, Any]:
             ),
             "source": _literal(values.get("source", "kairos"), {"manual", "kairos", "chat"}, "source"),
             "source_ref": _optional_str(values.get("source_ref")),
+            "reminder_delivery_id": None,
+            "reminder_delivered_at": None,
             "created_at": now,
             "updated_at": now,
         },

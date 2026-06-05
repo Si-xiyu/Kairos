@@ -39,6 +39,12 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.server.backend.doctor())
             elif route == "/api/capabilities":
                 self._send_json(self.server.backend.capabilities())
+            elif route == "/api/settings":
+                self._send_json(self.server.backend.settings())
+            elif route == "/api/project-scopes":
+                self._send_json(self.server.backend.list_project_scopes())
+            elif route == "/api/approvals":
+                self._send_json(self.server.backend.list_approvals(status=query.get("status", [None])[0]))
             elif route == "/api/daemon/status":
                 self._send_json({"running": False, "transport": "stdlib-http"})
             elif route == "/api/skills":
@@ -141,8 +147,11 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                         journal_date=_parse_date(body.get("date")),
                         heading=str(body.get("heading", "有价值的对话")),
                         include_roles=body.get("include_roles"),
+                        artifact_type=str(body.get("type", body.get("artifact_type", "diary"))),
                     )
                 )
+            elif route == "/api/journal/capture":
+                self._send_json(self.server.backend.journal_capture(body))
             elif route == "/api/journal/artifacts":
                 self._send_json(self.server.backend.create_journal_artifact(body))
             elif route == "/api/journal/artifacts/update":
@@ -163,6 +172,18 @@ class KairosRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.server.backend.update_todo_list(_body_id(body, "list_id"), body))
             elif route == "/api/todo-lists/delete":
                 self._send_json(self.server.backend.delete_todo_list(_body_id(body, "list_id")))
+            elif route == "/api/settings":
+                self._send_json(self.server.backend.update_settings(body))
+            elif route == "/api/project-scopes":
+                self._send_json(self.server.backend.create_project_scope(body))
+            elif route == "/api/project-scopes/update":
+                self._send_json(self.server.backend.update_project_scope(_body_id(body, "scope_id"), body))
+            elif route == "/api/project-scopes/delete":
+                self._send_json(self.server.backend.delete_project_scope(_body_id(body, "scope_id")))
+            elif route == "/api/approvals/approve":
+                self._send_json(self.server.backend.approve_action(_body_id(body, "approval_id")))
+            elif route == "/api/approvals/reject":
+                self._send_json(self.server.backend.reject_action(_body_id(body, "approval_id")))
             elif route == "/api/memories":
                 self._send_json(
                     self.server.backend.save_memory(

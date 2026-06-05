@@ -5,6 +5,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from kairos.backend.approvals import ApprovalStore
+from kairos.backend.scopes import ProjectScopeStore
+from kairos.backend.settings import SettingsStore
 from kairos.backend.todos import TodoStore, proposed_todo
 from kairos.channels import ChannelManager, CLIChannel, WindowsToastChannel
 from kairos.capabilities import SkillRegistry, list_capabilities
@@ -20,7 +23,6 @@ from kairos.lifelog import (
     write_reflection_draft,
 )
 from kairos.lifelog.artifacts import JournalArtifactStore
-from kairos.llm_config import load_llm_environment
 from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
 from kairos.memory.candidates import MemoryCandidateExtractor, save_candidates
 from kairos.messages import InboundMessage, OutboundMessage
@@ -126,9 +128,11 @@ class KairosBackend:
         journal_store = DailyJournalStore(self.paths)
         todo_store = TodoStore(self.paths)
         todos = todo_store.list_todos(status="open")
+        due_todos, upcoming_todos = _due_and_upcoming_todos(todos)
         schedules = self.list_schedules()["schedules"]
         due_jobs = ScheduleStore(self.paths).due()
         memories = self.list_memories(include_candidates=True)["summary"]
+        approvals = self.list_approvals(status="pending")["actions"]
         return {
             "date": today.isoformat(),
             "diary": {
@@ -140,6 +144,8 @@ class KairosBackend:
             "todos": {
                 "available": True,
                 "items": _upcoming_todos(todos),
+                "due": due_todos,
+                "upcoming": upcoming_todos,
                 "total_open": len(todos),
             },
             "reminders": {
@@ -147,6 +153,9 @@ class KairosBackend:
                 "total": len(schedules),
                 "enabled": sum(1 for job in schedules if job["enabled"]),
                 "due": len(due_jobs),
+                "high_level": [todo for todo in todos if todo.get("reminder_level") == "high"],
+                "normal": [todo for todo in todos if todo.get("reminder_level") == "normal"],
+                "companion_nudges": [],
                 "items": schedules[:10],
             },
             "recent_artifacts": self.recent_journal_artifacts(limit=7),
@@ -156,9 +165,9 @@ class KairosBackend:
                 "available": True,
             },
             "approvals": {
-                "available": False,
-                "pending": 0,
-                "note": "Approval queue persistence is not implemented yet.",
+                "available": True,
+                "pending": len(approvals),
+                "actions": approvals,
             },
             "delivery": {
                 "pending": _count_files(self.paths.delivery_pending, "*.json"),
@@ -173,17 +182,15 @@ class KairosBackend:
         }
 
     def model_status(self) -> dict[str, Any]:
-        env = load_llm_environment(root=self.paths.root)
-        provider = env.get("KAIROS_LLM_PROVIDER", "local").strip() or "local"
-        base_url = env.get("KAIROS_LLM_BASE_URL") or env.get("OPENAI_BASE_URL")
-        model = env.get("KAIROS_LLM_MODEL") or env.get("MODEL_ID")
+        llm = SettingsStore(self.paths).read()["llm"]
+        provider = str(llm.get("provider") or "local")
         if provider in {"openai-compatible", "openai", "api", "deepseek"}:
             return {
                 "provider": "openai-compatible",
                 "suggested_provider": "deepseek",
-                "base_url": base_url or "https://api.deepseek.com/v1",
-                "model": model or "deepseek-chat",
-                "configured": bool(env.get("KAIROS_LLM_API_KEY") or env.get("OPENAI_API_KEY")),
+                "base_url": llm.get("base_url") or "https://api.deepseek.com/v1",
+                "model": llm.get("model") or "deepseek-chat",
+                "configured": bool(llm.get("api_key_configured")),
             }
         return {
             "provider": "local",
@@ -192,6 +199,50 @@ class KairosBackend:
             "model": "kairos-local-mvp",
             "configured": True,
         }
+
+    def settings(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return SettingsStore(self.paths).read()
+
+    def update_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return SettingsStore(self.paths).update(values)
+
+    def list_project_scopes(self) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"scopes": ProjectScopeStore(self.paths).list()}
+
+    def create_project_scope(self, values: dict[str, Any]) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"scope": ProjectScopeStore(self.paths).create(values)}
+
+    def update_project_scope(self, scope_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"scope": ProjectScopeStore(self.paths).update(scope_id, values)}
+
+    def delete_project_scope(self, scope_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"deleted": ProjectScopeStore(self.paths).delete(scope_id)}
+
+    def list_approvals(self, status: str | None = None) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        actions = ApprovalStore(self.paths).list(status=status)
+        return {"actions": actions, "pending": sum(1 for item in actions if item.get("status") == "pending")}
+
+    def approve_action(self, approval_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        action = ApprovalStore(self.paths).set_status(approval_id, "approved")
+        result: dict[str, Any] | None = None
+        if action.get("action_type") == "todo.create":
+            payload = action.get("payload", {})
+            arguments = payload.get("arguments", payload) if isinstance(payload, dict) else {}
+            if isinstance(arguments, dict):
+                result = self.create_todo(arguments)
+        return {"action": action, "result": result}
+
+    def reject_action(self, approval_id: str) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        return {"action": ApprovalStore(self.paths).set_status(approval_id, "rejected")}
 
     def reflect(
         self,
@@ -365,6 +416,7 @@ class KairosBackend:
         journal_date: date | None = None,
         heading: str = DEFAULT_JOURNAL_CAPTURE_HEADING,
         include_roles: list[str] | None = None,
+        artifact_type: str = "diary",
     ) -> dict[str, Any]:
         ensure_workspace(self.paths)
         journal_date = journal_date or date.today()
@@ -377,12 +429,71 @@ class KairosBackend:
         if not events:
             return {**self.read_journal(journal_date), "captured": 0, "session_id": session_id}
 
-        lines = [f"来源会话：`{session_id}`", ""]
-        for event in events:
-            lines.append(f"- {event.created_at} {_author_for_role(event.role)}: {_single_line(event.content, 300)}")
+        summary = _summarize_session_events(events)
+        body = _journal_capture_body(session_id, summary)
+        if artifact_type == "record":
+            artifact = self.create_journal_artifact(
+                {
+                    "type": "record",
+                    "title": heading,
+                    "summary": summary["summary"],
+                    "tags": ["capture"],
+                    "source": {"kind": "chat", "session_id": session_id},
+                    "body": body,
+                }
+            )["artifact"]
+            return {
+                "captured": len(events),
+                "session_id": session_id,
+                "message": "已加入记录",
+                "artifact": artifact,
+                "summary": summary,
+            }
 
-        DailyJournalStore(self.paths).append_fragment(journal_date, heading, "\n".join(lines))
-        return {**self.read_journal(journal_date), "captured": len(events), "session_id": session_id}
+        DailyJournalStore(self.paths).append_fragment(journal_date, heading, body)
+        return {
+            **self.read_journal(journal_date),
+            "captured": len(events),
+            "session_id": session_id,
+            "message": "已加入日记",
+            "summary": summary,
+        }
+
+    def journal_capture(self, values: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(values.get("session") or values.get("session_id") or "")
+        if session_id:
+            return self.capture_session_to_journal(
+                session_id=session_id,
+                journal_date=_date_from_value(values.get("date")),
+                heading=str(values.get("title") or values.get("heading") or DEFAULT_JOURNAL_CAPTURE_HEADING),
+                include_roles=values.get("include_roles"),
+                artifact_type=str(values.get("type", values.get("artifact_type", "diary"))),
+            )
+        text = str(values.get("text", "")).strip()
+        if not text:
+            raise ValueError("session or text is required")
+        artifact_type = str(values.get("type", values.get("artifact_type", "record")))
+        summary = _summarize_text(text)
+        body = _journal_capture_body(None, summary)
+        if artifact_type == "diary":
+            journal_date = _date_from_value(values.get("date")) or date.today()
+            DailyJournalStore(self.paths).append_fragment(
+                journal_date,
+                str(values.get("title") or DEFAULT_JOURNAL_CAPTURE_HEADING),
+                body,
+            )
+            return {**self.read_journal(journal_date), "message": "已加入日记", "summary": summary, "captured": 1}
+        artifact = self.create_journal_artifact(
+            {
+                "type": "record",
+                "title": str(values.get("title") or "Conversation record"),
+                "summary": summary["summary"],
+                "tags": values.get("tags", ["capture"]),
+                "source": {"kind": "chat", "session_id": None},
+                "body": body,
+            }
+        )["artifact"]
+        return {"message": "已加入记录", "artifact": artifact, "summary": summary, "captured": 1}
 
     def recent_journal_artifacts(self, limit: int = 7) -> list[dict[str, Any]]:
         artifacts = JournalArtifactStore(self.paths).list(limit=limit)
@@ -434,11 +545,15 @@ class KairosBackend:
 
     def create_todo(self, values: dict[str, Any]) -> dict[str, Any]:
         ensure_workspace(self.paths)
-        return {"todo": TodoStore(self.paths).create_todo(values)}
+        todo = TodoStore(self.paths).create_todo(values)
+        enqueued = self.enqueue_due_todo_reminders()
+        return {"todo": todo, "delivery_enqueued": enqueued["enqueued"]}
 
     def update_todo(self, todo_id: str, values: dict[str, Any]) -> dict[str, Any]:
         ensure_workspace(self.paths)
-        return {"todo": TodoStore(self.paths).update_todo(todo_id, values)}
+        todo = TodoStore(self.paths).update_todo(todo_id, values)
+        enqueued = self.enqueue_due_todo_reminders()
+        return {"todo": todo, "delivery_enqueued": enqueued["enqueued"]}
 
     def complete_todo(self, todo_id: str) -> dict[str, Any]:
         ensure_workspace(self.paths)
@@ -451,6 +566,35 @@ class KairosBackend:
     def propose_todo(self, values: dict[str, Any]) -> dict[str, Any]:
         ensure_workspace(self.paths)
         return proposed_todo(values)
+
+    def enqueue_due_todo_reminders(self, now: datetime | None = None) -> dict[str, Any]:
+        ensure_workspace(self.paths)
+        now = _coerce_datetime(now or datetime.now(timezone.utc))
+        store = TodoStore(self.paths)
+        queue = DeliveryQueue(self.paths)
+        enqueued: list[dict[str, Any]] = []
+        for todo in store.list_todos(status="open"):
+            if todo.get("reminder_level") == "none" or not todo.get("remind_at"):
+                continue
+            remind_at = _parse_iso_datetime(str(todo["remind_at"]))
+            if remind_at > now or todo.get("reminder_delivery_id"):
+                continue
+            prefix = "High-level reminder" if todo.get("reminder_level") == "high" else "Reminder"
+            delivery_id = queue.enqueue(
+                channel="windows_toast",
+                to="local-user",
+                text=f"{prefix}: {todo['title']}",
+                now=now,
+            )
+            updated = store.update_todo(
+                str(todo["id"]),
+                {
+                    "reminder_delivery_id": delivery_id,
+                    "reminder_delivered_at": now.isoformat(),
+                },
+            )
+            enqueued.append(updated)
+        return {"enqueued": len(enqueued), "todos": enqueued}
 
     def list_todo_lists(self) -> dict[str, Any]:
         ensure_workspace(self.paths)
@@ -531,8 +675,10 @@ class KairosBackend:
             presence_handler=lambda event, now: _presence_handler(event, now, self.paths),
         )
         result = runtime.tick()
+        todo_reminders = self.enqueue_due_todo_reminders()
         return {
             "due_jobs": result.due_jobs,
+            "todo_reminders": todo_reminders["enqueued"],
             "enqueued": result.enqueued,
             "failed_jobs": result.failed_jobs,
             "delivery": result.delivery,
@@ -972,9 +1118,84 @@ def _coerce_datetime(value: datetime) -> datetime:
     return value
 
 
+def _parse_iso_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return _coerce_datetime(parsed)
+
+
+def _date_from_value(value: object | None) -> date | None:
+    if value is None or value == "":
+        return None
+    return date.fromisoformat(str(value))
+
+
 def _upcoming_todos(todos: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
     def key(todo: dict[str, Any]) -> tuple[str, str]:
         due = str(todo.get("due_at") or todo.get("remind_at") or "9999-12-31T23:59:59+00:00")
         return due, str(todo.get("created_at", ""))
 
     return sorted(todos, key=key)[:limit]
+
+
+def _due_and_upcoming_todos(todos: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    now = datetime.now(timezone.utc)
+    due: list[dict[str, Any]] = []
+    upcoming: list[dict[str, Any]] = []
+    for todo in _upcoming_todos(todos, limit=len(todos) or 1):
+        raw = todo.get("due_at") or todo.get("remind_at")
+        if raw and _parse_iso_datetime(str(raw)) <= now:
+            due.append(todo)
+        else:
+            upcoming.append(todo)
+    return due, upcoming[:10]
+
+
+def _summarize_session_events(events: list[SessionEvent]) -> dict[str, Any]:
+    user_lines = [_single_line(event.content, 180) for event in events if event.role == "user"]
+    assistant_lines = [_single_line(event.content, 180) for event in events if event.role == "assistant"]
+    topic_source = user_lines[0] if user_lines else (assistant_lines[0] if assistant_lines else "Conversation")
+    highlights = [line for line in [*user_lines[:3], *assistant_lines[:2]] if line]
+    action_items = [
+        line
+        for line in highlights
+        if _contains_any(line.lower(), {"todo", "remind", "deadline", "follow up", "action", "任务", "提醒", "截止", "跟进"})
+    ]
+    return {
+        "summary": _single_line(topic_source, 160),
+        "topics": highlights[:5],
+        "decisions": [],
+        "action_items": action_items[:5],
+        "message_count": len(events),
+    }
+
+
+def _summarize_text(text: str) -> dict[str, Any]:
+    lines = [_single_line(line, 180) for line in text.splitlines() if line.strip()]
+    if not lines:
+        lines = [_single_line(text, 180)]
+    action_items = [
+        line
+        for line in lines
+        if _contains_any(line.lower(), {"todo", "remind", "deadline", "follow up", "action", "任务", "提醒", "截止", "跟进"})
+    ]
+    return {
+        "summary": _single_line(lines[0], 160),
+        "topics": lines[:5],
+        "decisions": [],
+        "action_items": action_items[:5],
+        "message_count": 1,
+    }
+
+
+def _journal_capture_body(session_id: str | None, summary: dict[str, Any]) -> str:
+    lines = []
+    if session_id:
+        lines.extend([f"来源会话：`{session_id}`", ""])
+    lines.extend(["## 摘要", "", str(summary["summary"]), "", "## 要点", ""])
+    topics = summary.get("topics") or []
+    lines.extend(f"- {topic}" for topic in topics)
+    action_items = summary.get("action_items") or []
+    if action_items:
+        lines.extend(["", "## 行动项", ""])
+        lines.extend(f"- {item}" for item in action_items)
+    return "\n".join(lines).rstrip()
