@@ -63,6 +63,77 @@ def test_backend_service_today_todo_and_journal_artifacts(tmp_path: Path) -> Non
     assert artifacts[0]["id"] == artifact["id"]
 
 
+def test_backend_settings_scopes_approvals_and_due_reminders(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.bootstrap()
+
+    settings = backend.update_settings(
+        {
+            "llm": {
+                "provider": "openai-compatible",
+                "base_url": "https://api.deepseek.com/v1",
+                "model": "deepseek-chat",
+                "api_key": "secret-key",
+            },
+            "notifications": {"daily_notification_budget": 5},
+        }
+    )
+    scope = backend.create_project_scope(
+        {
+            "name": "Backend",
+            "path": ".",
+            "permissions": {"read": True, "write": True, "command": False},
+        }
+    )["scope"]
+    proposed = backend.chat_once(
+        '/tool todo.propose title="Confirm reliable reminder" remind_at=2026-01-01T09:00:00+00:00 reminder_level=high source=chat',
+        session="proposal",
+        autonomy=3,
+    )
+    pending = backend.list_approvals(status="pending")["actions"]
+    approved = backend.approve_action(pending[0]["id"])
+    reminder = backend.create_todo(
+        {
+            "title": "Already due reminder",
+            "kind": "reminder",
+            "remind_at": "2026-01-01T09:00:00+00:00",
+            "reminder_level": "high",
+        }
+    )
+    today = backend.today()
+
+    assert settings["llm"]["api_key_configured"] is True
+    assert "secret-key" not in json.dumps(settings)
+    assert scope["permission_summary"] == "read, write"
+    assert "waiting for confirmation" in proposed["outbound"][0]["text"]
+    assert approved["result"]["todo"]["title"] == "Confirm reliable reminder"
+    assert reminder["delivery_enqueued"] >= 1
+    assert today["approvals"]["available"] is True
+    assert today["reminders"]["high_level"]
+    assert today["delivery"]["pending"] >= 1
+
+
+def test_backend_journal_capture_structured_diary_and_record(tmp_path: Path) -> None:
+    backend = KairosBackend(tmp_path)
+    backend.chat_once("Discussed journal capture. Todo: review the record tomorrow.", session="capture-chat")
+
+    diary = backend.journal_capture({"session": "capture-chat", "type": "diary", "date": "2026-05-16"})
+    record = backend.journal_capture(
+        {
+            "type": "record",
+            "title": "Capture summary",
+            "text": "We decided to archive a structured summary.\nAction: check the Journal view.",
+        }
+    )
+
+    assert diary["message"] == "已加入日记"
+    assert "## 摘要" in diary["content"]
+    assert "来源会话" in diary["content"]
+    assert record["message"] == "已加入记录"
+    assert record["artifact"]["summary"] == "We decided to archive a structured summary."
+    assert "raw transcript" not in record["artifact"]["body"].lower()
+
+
 def test_backend_service_schedule_tick_chat_and_weekly_review(tmp_path: Path) -> None:
     backend = KairosBackend(tmp_path)
     backend.bootstrap()

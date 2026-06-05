@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
 from kairos.config import KairosPaths
+from kairos.backend.approvals import ApprovalStore
 from kairos.backend.todos import TodoStore, proposed_todo
+from kairos.delivery import DeliveryQueue
+from kairos.lifelog import DailyJournalStore
+from kairos.lifelog.artifacts import JournalArtifactStore
 from kairos.memory import MemoryEntry, MemoryScope, MemoryStore, MemoryType
 from kairos.tools.registry import ToolResult, ToolSpec
 
@@ -185,7 +190,7 @@ def build_advanced_tools(paths: KairosPaths) -> list[ToolSpec]:
             input_schema=_todo_schema(required=["title"]),
             risk_level="low",
             source="native",
-            handler=lambda **kwargs: _todo_propose(kwargs),
+            handler=lambda **kwargs: _todo_propose(paths, kwargs),
         ),
         ToolSpec(
             name="todo.create",
@@ -218,6 +223,26 @@ def build_advanced_tools(paths: KairosPaths) -> list[ToolSpec]:
             risk_level="medium",
             source="native",
             handler=lambda id: _todo_delete(paths, id),
+        ),
+        ToolSpec(
+            name="journal.capture",
+            description="Capture a structured summary into the Journal as a Diary entry or Record.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["diary", "record"]},
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "topics": {"type": "array", "items": {"type": "string"}},
+                    "action_items": {"type": "array", "items": {"type": "string"}},
+                    "date": {"type": "string"},
+                    "session_id": {"type": "string"},
+                },
+                "required": ["summary"],
+            },
+            risk_level="low",
+            source="native",
+            handler=lambda **kwargs: _journal_capture(paths, kwargs),
         ),
         ToolSpec(
             name="meal.recommend",
@@ -392,18 +417,36 @@ def _todo_schema(required: list[str]) -> dict[str, Any]:
     }
 
 
-def _todo_propose(values: dict[str, Any]) -> ToolResult:
+def _todo_propose(paths: KairosPaths, values: dict[str, Any]) -> ToolResult:
     proposal = proposed_todo({**values, "source": values.get("source", "kairos")})
     todo = proposal["todo"]
+    approval = ApprovalStore(paths).create(
+        {
+            "action_type": "todo.create",
+            "title": f"Create todo: {todo['title']}",
+            "summary": _todo_approval_summary(todo),
+            "payload": {"tool": "todo.create", "arguments": todo},
+            "source": todo.get("source", "kairos"),
+        }
+    )
     return ToolResult(
         "ok",
-        f"Proposed todo: {todo['title']}",
-        proposal,
+        f"Todo is waiting for confirmation: {todo['title']}",
+        {**proposal, "approval": approval},
     )
 
 
 def _todo_create(paths: KairosPaths, values: dict[str, Any]) -> ToolResult:
     todo = TodoStore(paths).create_todo({**values, "source": values.get("source", "kairos")})
+    delivery_id = _enqueue_due_todo_reminder(paths, todo)
+    if delivery_id:
+        todo = TodoStore(paths).update_todo(
+            str(todo["id"]),
+            {
+                "reminder_delivery_id": delivery_id,
+                "reminder_delivered_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
     return ToolResult("ok", f"Created todo: {todo['title']}", {"todo": todo})
 
 
@@ -423,6 +466,71 @@ def _todo_delete(paths: KairosPaths, todo_id: str) -> ToolResult:
     status = "ok" if deleted else "error"
     preview = f"Deleted todo: {todo_id}" if deleted else f"Todo not found: {todo_id}"
     return ToolResult(status, preview, {"deleted": deleted})
+
+
+def _todo_approval_summary(todo: dict[str, Any]) -> str:
+    parts = [str(todo["title"])]
+    if todo.get("remind_at"):
+        parts.append(f"remind at {todo['remind_at']}")
+    elif todo.get("due_at"):
+        parts.append(f"due at {todo['due_at']}")
+    if todo.get("reminder_level") == "high":
+        parts.append("high-level reminder")
+    return " | ".join(parts)
+
+
+def _enqueue_due_todo_reminder(paths: KairosPaths, todo: dict[str, Any]) -> str | None:
+    if todo.get("reminder_level") == "none" or not todo.get("remind_at"):
+        return None
+    remind_at = datetime.fromisoformat(str(todo["remind_at"]))
+    if remind_at.tzinfo is None:
+        remind_at = remind_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if remind_at > now:
+        return None
+    prefix = "High-level reminder" if todo.get("reminder_level") == "high" else "Reminder"
+    return DeliveryQueue(paths).enqueue(
+        channel="windows_toast",
+        to="local-user",
+        text=f"{prefix}: {todo['title']}",
+        now=now,
+    )
+
+
+def _journal_capture(paths: KairosPaths, values: dict[str, Any]) -> ToolResult:
+    artifact_type = str(values.get("type", "record"))
+    title = str(values.get("title") or "Journal Capture")
+    summary = str(values.get("summary", "")).strip()
+    if not summary:
+        return ToolResult("error", "summary is required")
+    body = _journal_capture_markdown(values)
+    if artifact_type == "diary":
+        raw_date = values.get("date")
+        journal_date = date.fromisoformat(str(raw_date)) if raw_date else date.today()
+        path = DailyJournalStore(paths).append_fragment(journal_date, title, body)
+        return ToolResult("ok", "已加入日记", {"message": "已加入日记", "path": str(path), "summary": summary})
+    artifact = JournalArtifactStore(paths).create(
+        {
+            "type": "record",
+            "title": title,
+            "summary": summary,
+            "tags": values.get("tags", ["capture"]),
+            "source": {"kind": "chat", "session_id": values.get("session_id")},
+            "body": body,
+        }
+    )
+    return ToolResult("ok", "已加入记录", {"message": "已加入记录", "artifact": artifact, "summary": summary})
+
+
+def _journal_capture_markdown(values: dict[str, Any]) -> str:
+    lines = ["## 摘要", "", str(values["summary"]).strip(), "", "## 要点", ""]
+    topics = values.get("topics") if isinstance(values.get("topics"), list) else []
+    lines.extend(f"- {topic}" for topic in topics if str(topic).strip())
+    action_items = values.get("action_items") if isinstance(values.get("action_items"), list) else []
+    if action_items:
+        lines.extend(["", "## 行动项", ""])
+        lines.extend(f"- {item}" for item in action_items if str(item).strip())
+    return "\n".join(lines).rstrip()
 
 
 def _meal_recommend(
