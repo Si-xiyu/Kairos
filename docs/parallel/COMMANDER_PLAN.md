@@ -1,229 +1,215 @@
-﻿# Kairos 并行实现总控计划
+# Kairos Parallel Development Commander Plan
 
-本文档最初用于三路并行开发；当前产品方向已经重置为 `docs/product/PRODUCT_TECHNICAL_PLAN.md` 中定义的本地优先个人工作/生活操作台。新的并行实现应优先使用前后端 agent 分工：
+This document is the current coordination contract for parallel Kairos development. Older Claude/Codex worker rounds are obsolete. Kairos is now a local-first personal work/life operating console with a desktop-app experience, reliable Todo, Journal/Record knowledge base, Project Scopes, Settings, and a planned local RAG retrieval layer.
 
-- Backend Agent：负责 FastAPI、本地存储、Todo/Journal/Today API、工具权限管道与 DeepSeek/OpenAI-compatible provider 配置。
-- Frontend Agent：负责 React/Vite 桌面式 app shell、Today View、Todo、Journal、Project Scopes、Settings 与 contextual chat sidebar。
-- Commander：负责主干方向、公共接口、最终合并和冲突裁决。
+## Required Reading
 
-所有实例都必须先阅读：
+Every development agent must read:
 
 1. `CONTEXT.md`
 2. `docs/product/PRODUCT_TECHNICAL_PLAN.md`
-3. 本文档
-4. 自己的任务简报
+3. `docs/architecture/RAG_IMPLEMENTATION_PLAN.md`
+4. `docs/api/BACKEND_API.md`
+5. this file
+6. its branch-specific prompt
 
-当前任务简报：
+Branch-specific prompts:
 
 ```text
-docs/parallel/BACKEND_AGENT_PROMPT.md
-docs/parallel/FRONTEND_AGENT_PROMPT.md
+docs/parallel/BACKEND_DEVELOPMENT_PROMPT.md
+docs/parallel/FRONTEND_DEVELOPMENT_PROMPT.md
+docs/parallel/RAG_DEVELOPMENT_PROMPT.md
 ```
 
-## 当前主干状态
+## Current Mainline Status
 
-Commander 已建立最小项目骨架：
+Main currently contains:
+
+- FastAPI backend with `KairosBackend` service layer.
+- React/Vite desktop-like app shell.
+- Today View API and frontend surface.
+- Todo and Todo List CRUD.
+- reliable reminder bridge for Todo `remind_at`.
+- Journal Diary/Record artifact APIs and frontend editor.
+- Journal capture into Diary or Record.
+- Settings API and frontend surface with DeepSeek/OpenAI-compatible configuration.
+- Project Scope API and frontend surface.
+- durable Approved Actions and approval endpoints.
+- native tools including Todo tools and existing file/memory/search helpers.
+- permission and audit pipeline through `ToolRouter`, `PermissionManager`, and `AuditLogger`.
+- RAG architecture and product plan documents, but not the RAG implementation.
+
+The latest verified baseline before this plan update:
 
 ```text
-pyproject.toml
-README.md
-AGENTS.md
-CLAUDE.md
-src/kairos/
-  cli.py
-  config.py
-  messages.py
-  core/
-  tools/
-  permissions/
-  memory/
-  lifelog/
-  presence/
-  channels/
-  delivery/
-scripts/smoke_check.py
+E:\software\Miniconda\python.exe -m pytest
+67 passed
+
+npm run build
+passed
 ```
 
-主干已经定义的公共契约：
+## Active Development Branches
 
-- `KairosPaths` 与 `ensure_workspace`
-- `InboundMessage` 与 `OutboundMessage`
-- `AgentLoop` 占位
-- `SessionStore` 与 `SessionEvent`
-- `ToolRegistry`、`ToolSpec`、`ToolResult`
-- `ToolRouter` 与 `ToolExecutionResult`
-- `PermissionManager`、`AutonomyLevel`
-- `AuditLogger` 与 `AuditEvent`
-- `build_native_registry`
-
-其他 worker 应优先复用这些契约，不要平行创建另一套消息、路径或权限类型。
-
-## Commander 负责范围
-
-Commander 保留以下文件的最终所有权：
+Use three branches/worktrees:
 
 ```text
-pyproject.toml
-README.md
-AGENTS.md
-CLAUDE.md
-TECHNICAL_REQUIREMENTS.md
-docs/parallel/**
-src/kairos/cli.py
-src/kairos/config.py
-src/kairos/messages.py
-src/kairos/core/**
-src/kairos/tools/**
-src/kairos/permissions/**
-scripts/**
+backend
+frontend
+rag
 ```
 
-如果 worker 必须修改上述文件，应在最终报告中明确说明原因和建议 diff，而不是直接大改。
-
-## Worker 任务分配
-
-### Product Reset Round
-
-Backend Agent 任务文件：
+Recommended worktree layout:
 
 ```text
-docs/parallel/BACKEND_AGENT_PROMPT.md
+.worktree/backend
+.worktree/frontend
+.worktree/rag
 ```
 
-Frontend Agent 任务文件：
+Before starting work, each branch should merge or rebase from current `main`. Do not work from old branch bases.
+
+## Ownership Boundaries
+
+### Backend Branch
+
+Owns product backend contracts outside RAG internals:
 
 ```text
-docs/parallel/FRONTEND_AGENT_PROMPT.md
-```
-
-建议顺序：
-
-1. Backend Agent 先补稳定 API：Today、Todo、Journal artifact foundation、DeepSeek-oriented provider defaults。
-2. Frontend Agent 可并行做 app shell 和受控 fallback，但不要把 mock 数据散落在组件里。
-3. Commander 合并时优先检查 API contract 是否与 `docs/api/BACKEND_API.md` 和 frontend adapter 一致。
-4. 前端发现缺口时在最终报告写 `Backend contract gaps`，不要直接大改后端。
-5. 后端发现前端需要调整时在最终报告写 `Frontend contract notes`，不要直接大改前端。
-
-### Round 2
-
-Claude Code 下一轮任务：
-
-```text
-docs/parallel/ROUND2_CLAUDE_REFLECTION_MEMORY.md
-```
-
-Codex Worker 下一轮任务：
-
-```text
-docs/parallel/ROUND2_CODEX_SCHEDULER_DAEMON.md
-```
-
-两边开始前都应先同步 main，避免基于第一轮旧骨架继续写。
-
-### Round 1
-
-### Claude Code
-
-任务文件：
-
-```text
-docs/parallel/CLAUDE_TASK_MEMORY_LIFELOG.md
-```
-
-写入范围：
-
-```text
-src/kairos/memory/**
-src/kairos/lifelog/**
-tests/test_memory_lifelog.py
-templates/journal/**
-docs/adr/*memory*
-docs/adr/*lifelog*
-```
-
-### Codex Worker
-
-任务文件：
-
-```text
-docs/parallel/CODEX_TASK_PRESENCE_DELIVERY.md
-```
-
-写入范围：
-
-```text
-src/kairos/presence/**
-src/kairos/channels/**
-src/kairos/delivery/**
+backend/src/kairos/backend/**
+backend/src/kairos/presence/**
+backend/src/kairos/delivery/**
+backend/src/kairos/channels/**
+backend/src/kairos/settings-related code if added
+docs/api/BACKEND_API.md
+tests/test_backend_api.py
+tests/test_fastapi_app.py
 tests/test_presence_delivery.py
-docs/adr/*presence*
-docs/adr/*delivery*
 ```
 
-## 并行开发规则
+Backend may touch tools only when wiring product APIs to existing tool contracts. It should not implement the retrieval engine; that belongs to `rag`.
 
-1. 不修改别人拥有的模块。
-2. 不进行全仓格式化。
-3. 不引入外部依赖，除非任务简报明确允许。
-4. 不修改 `pyproject.toml`，如确实需要依赖，在最终报告中提出。
-5. 新增公共接口时，尽量放在自己模块内部；跨模块接口先用已有契约。
-6. 测试必须能在仓库根目录运行。
-7. 所有本地用户数据默认写入临时目录或 `.kairos/`，测试不得污染真实用户目录。
+### Frontend Branch
 
-## 合并顺序
+Owns the desktop app UI and adapters:
 
-建议合并顺序：
+```text
+frontend/src/**
+frontend/package.json
+frontend/README.md
+docs/frontend/**
+```
 
-1. Commander 主干骨架。
-2. Claude Code 的 Memory/Life Log 分支。
-3. Codex Worker 的 Presence/Delivery 分支。
-4. Commander 统一接线、修正公共接口、补 smoke check。
+Frontend should not modify backend implementation files. If an API contract is missing or inconsistent, report the contract gap or update frontend adapters only when the backend route already exists.
 
-原因：
+### RAG Branch
 
-- Memory/Life Log 较少依赖 Presence。
-- Presence 可在 Life Log 接口存在后添加日记提醒事件。
-- 最终 CLI/API 接线由 Commander 统一处理，避免两个 worker 同时改 CLI。
+Owns local retrieval and evidence-based answer infrastructure:
 
-## Worker 最终报告格式
+```text
+backend/src/kairos/retrieval/**
+backend/src/kairos/tools/advanced.py or native registry wiring for rag tools
+backend/src/kairos/backend/fastapi_app.py only for /api/rag routes
+backend/src/kairos/backend/service.py only for thin RetrievalService delegation
+backend/src/kairos/backend/settings.py only for RAG settings
+docs/architecture/RAG_IMPLEMENTATION_PLAN.md
+docs/api/BACKEND_API.md RAG sections
+tests/test_rag_*.py
+```
 
-每个 worker 完成后，请在最终回复中包含：
+RAG must not bypass Project Scope permission checks, ToolRouter, PermissionManager, or AuditLogger.
+
+## Shared Rules
+
+1. Preserve the language in `CONTEXT.md`.
+2. Keep user-facing durable knowledge in Journal/Record, not Memory.
+3. Keep Memory as agent-facing context and candidate-gated.
+4. Keep all agent-initiated tools behind `ToolRouter -> PermissionManager -> AuditLogger`.
+5. Do not introduce LangChain, LangGraph, PostgreSQL, OpenSearch, Redis, or Airflow for the current RAG slice.
+6. Do not make broad RAG scopes such as `all`, `*`, `filesystem`, `memory`, or `chat`.
+7. Do not index out-of-scope files or sensitive files.
+8. Do not write private runtime data into the repository.
+9. Do not run whole-repo formatting.
+10. Add tests for new contracts and keep existing tests green.
+
+## Coordination Order
+
+Recommended order:
+
+1. `rag` implements `/api/rag/search` for `journal` scope and `rag.search` tool first.
+2. `frontend` adds Journal search UI against `/api/rag/search` once the route exists.
+3. `backend` continues non-RAG product hardening: approvals, settings, reminders, project-scope lifecycle, daemon/status polish.
+4. `rag` adds Ollama embeddings and BM25 fallback.
+5. `rag` adds `/api/rag/answer` and `rag.answer`.
+6. `frontend` adds evidence answer UI, upload UI, and retrieval status/citation display.
+7. `backend` and `rag` coordinate on Project Scope indexing and upload persistence.
+
+Commander should merge in this order when possible:
+
+```text
+backend -> rag -> frontend
+```
+
+If frontend depends on new RAG or backend routes, merge those backend/RAG branches first.
+
+## Merge Checklist
+
+Before merging a branch:
+
+- confirm the branch started from current enough `main`,
+- inspect `git diff --name-only`,
+- confirm files are inside branch ownership boundaries,
+- run relevant tests,
+- run full tests when backend or RAG changed,
+- run frontend build when frontend changed,
+- check API route names against `docs/api/BACKEND_API.md`,
+- check frontend adapter paths against actual FastAPI routes,
+- check no `.kairos/`, logs, local indexes, uploads, or worktree directories were staged.
+
+Required final verification after all merges:
+
+```powershell
+New-Item -ItemType Directory -Force .tmp | Out-Null
+$env:TMP=(Resolve-Path .tmp).Path
+$env:TEMP=(Resolve-Path .tmp).Path
+$env:PYTEST_ADDOPTS='-p no:cacheprovider --basetemp=.tmp/pytest'
+& 'E:\software\Miniconda\python.exe' -m pytest
+```
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Final Report Format
+
+Each branch agent must report:
 
 ```text
 Changed files:
-- path/to/file.py
+- ...
 
 Implemented:
 - ...
 
+API/tool contracts:
+- ...
+
 Tests:
-- command run
+- command
 - result
 
-Public interface requests:
-- 如果需要 Commander 修改公共接口，在这里写清楚
+Contract gaps or merge notes:
+- ...
 
 Risks / TODO:
 - ...
 ```
 
-## Commander 合并检查清单
+Commander final report should additionally include:
 
-合并每个 worker 后，Commander 应检查：
-
-- `git diff --name-only` 是否只包含该 worker 写入范围。
-- 是否新增外部依赖。
-- 是否破坏 `scripts/smoke_check.py`。
-- 是否绕过权限系统。
-- 是否把私人数据写入仓库。
-- 是否存在 Windows 路径或编码问题。
-
-最终至少运行：
-
-```text
-python scripts/smoke_check.py
-python -m pytest tests/test_core_runtime.py
-PYTHONPATH=src python -m kairos.cli status
-PYTHONPATH=src python -m kairos.cli tools
-PYTHONPATH=src python -m kairos.cli init --root <temp-dir>
-```
+- current project progress,
+- merged commits,
+- verification results,
+- remaining branch responsibilities,
+- final acceptance status.

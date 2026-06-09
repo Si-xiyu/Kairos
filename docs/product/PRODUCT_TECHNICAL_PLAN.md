@@ -8,6 +8,7 @@ Kairos is for personal work and life continuity:
 
 - reliable todos and reminders,
 - curated diaries and records,
+- evidence-based retrieval over authorized knowledge,
 - local project scopes where Kairos can work with files,
 - agent memory used as internal context,
 - low-frequency companion nudges,
@@ -66,6 +67,42 @@ All diary and record files are `.md` files. Metadata is stored in YAML front mat
 
 Journal capture is low risk. Kairos may add curated diary or record entries after a valuable conversation without pre-approval, but it must tell the user afterward and offer obvious correction paths such as edit, move, or undo.
 
+### RAG and Knowledge Retrieval
+
+RAG is Kairos's local evidence retrieval layer over authorized user knowledge. It is not a standalone paper QA system and does not replace the Agent Loop, Journal, Memory, Project Scope, or permission model.
+
+The first version should use:
+
+- SQLite FTS5 for BM25 keyword search.
+- Optional Ollama embeddings for semantic search.
+- RRF to merge BM25 and vector rankings.
+- Automatic BM25 fallback when embedding is unavailable.
+- Citation-first answers over retrieved evidence.
+
+RAG sources are explicit:
+
+- `journal`: built-in Diary and Record artifacts.
+- `uploads`: user-uploaded `.txt`, `.md`, and `.pdf` files.
+- `project:{scope_id}`: files inside an enabled and authorized Project Scope.
+
+The first version must not support broad scopes such as `all`, `*`, `filesystem`, `memory`, or `chat`. Raw Chat should become Diary or Record artifacts before entering the searchable knowledge base. Memory remains agent-facing context, not a user-facing RAG source.
+
+RAG exposes both HTTP and tool adapters:
+
+```text
+RetrievalService
+  -> POST /api/rag/search
+  -> POST /api/rag/answer
+  -> rag.search tool
+  -> rag.answer tool
+```
+
+The HTTP API is for frontend search, "ask from records" flows, and debugging. The tool adapter is for Kairos agent turns and must pass through `ToolRouter`, `PermissionManager`, and `AuditLogger`.
+
+`rag.search` returns evidence chunks and citations. `rag.answer` uses the currently configured chat provider to synthesize an answer from citations. If no sufficient evidence exists, it must say so instead of fabricating.
+
+The detailed implementation plan is tracked in [../architecture/RAG_IMPLEMENTATION_PLAN.md](../architecture/RAG_IMPLEMENTATION_PLAN.md).
+
 ### Memory
 
 Memory is agent-facing context, not the user's primary knowledge base. It stores preferences, routines, follow-ups, and facts that help Kairos behave consistently. Memory should support review and correction in Settings, but it does not need a first-level app view.
@@ -108,6 +145,8 @@ Default policy:
 - Reliable todos require confirmation before creation from conversation.
 - High-level reminders require confirmed todos.
 - File writes, destructive actions, shell commands, external network tools, and cross-scope access require stronger approval.
+- Agent-triggered RAG searches over explicit scopes must use RAG tools through the permission and audit pipeline.
+- User-triggered RAG API calls must validate requested scopes and record retrieval events.
 - Every tool action should be explainable in the inspector or activity log.
 
 ## Technical Architecture
@@ -130,6 +169,7 @@ Current working assets to preserve:
 - permission-gated tool router.
 - audit logs.
 - memory and journal stores.
+- retrieval service for Journal/Record, uploads, and authorized Project Scopes.
 - schedule/delivery/heartbeat foundations.
 - React session UI and agent inspector.
 - OpenAI-compatible provider boundary.
@@ -140,14 +180,18 @@ Model/API direction:
 - The near-term default API target is DeepSeek.
 - Keep the provider implementation OpenAI-compatible instead of hard-coding one vendor into the agent loop.
 - Settings should expose DeepSeek-oriented defaults while still allowing base URL, API key, and model overrides.
+- RAG answer synthesis should use the currently configured chat provider.
+- RAG embeddings should default to local Ollama (`http://127.0.0.1:11434`) with `bge-m3` or `nomic-embed-text`, and degrade to BM25 if unavailable.
 - Other providers can remain possible later, but they are not the product baseline for the next build slice.
 
 Storage responsibilities:
 
 - Markdown: diary and record knowledge base.
 - JSONL: sessions, audit, tool events, append-only runtime streams.
-- SQLite, later: todos, settings, indexes, notification state, and cross-artifact queries.
-- Vector index, later: retrieval layer only, never the sole source of truth.
+- SQLite: todos, settings, notification state, cross-artifact queries, and RAG index tables.
+- `.kairos/search/index.sqlite`: RAG documents, chunks, FTS5 BM25 index, embeddings, and index jobs.
+- `.kairos/search/events.jsonl`: lightweight local retrieval events.
+- Vector storage: first-version local SQLite BLOB/JSON plus Python similarity; later optional `sqlite-vec` if needed.
 
 ## Implementation Stages
 
@@ -191,15 +235,20 @@ Goal: make Journal the user's readable archive.
 - Add Journal view with diary/record switch, search, tags, editor, and source links.
 - Convert session capture into curated journal capture rather than raw transcript copy.
 - Add post-capture user feedback: added, edit, undo, move between diary and record.
+- Introduce RAG indexing for Diary and Record artifacts.
+- Add `/api/rag/search` for `journal` scope.
+- Register `rag.search` as a permission-gated native tool.
 
 ### Stage 4: Settings and Trust
 
 Goal: make local-first trust visible.
 
 - Add Settings view for model provider, storage paths, notification policy, project scopes, memory review, MCP/search/weather providers.
+- Add RAG settings for embedding provider, embedding model, index location, and rebuild index.
 - Add approval queue/activity log UI around tool calls.
 - Make scope permissions configurable.
 - Add quiet hours, notification budget, and low-level nudge frequency controls.
+- Show retrieval fallback status when vector search is unavailable.
 
 ### Stage 5: Project Scopes and File Work
 
@@ -207,10 +256,23 @@ Goal: make local file work useful without becoming the whole app.
 
 - Add Project Scopes view for attaching directories and editing permissions.
 - Expand file tools around scoped access.
+- Add explicit Project Scope indexing for `project:{scope_id}` RAG searches.
+- Respect safe-text file rules and ignore/exclude patterns during project indexing.
 - Add safer file write previews and diff display.
 - Add approved shell/test tools only after permission UX is solid.
 
-### Stage 6: Electron Desktop Release
+### Stage 6: Uploads and Evidence-Based Answers
+
+Goal: let Kairos answer from authorized knowledge with citations.
+
+- Add Uploads source for `.txt`, `.md`, and `.pdf` files.
+- Track upload parsing/indexing states: uploaded, parsing, indexed, failed.
+- Add `/api/rag/answer` and `rag.answer`.
+- Require citations in RAG answers.
+- Add answer UI that shows citations and retrieval status.
+- Record local retrieval events for search and answer calls.
+
+### Stage 7: Electron Desktop Release
 
 Goal: package Kairos as an ordinary Windows desktop app.
 
@@ -225,10 +287,11 @@ Goal: package Kairos as an ordinary Windows desktop app.
 
 The next concrete build slice should be:
 
-1. Fix mojibake in user-facing backend defaults and docs.
-2. Add frontend shell layout: left nav + Today + chat sidebar.
-3. Add minimal Today API composition from existing state, sessions, journal, schedules, and delivery data.
-4. Add Todo model/API/tests.
-5. Add Todo view.
+1. Add `backend/src/kairos/retrieval/` with SQLite index store, chunking, BM25 search, RRF merge, and retrieval events.
+2. Index existing Diary and Record artifacts into `.kairos/search/index.sqlite`.
+3. Implement `POST /api/rag/search` for `scope=["journal"]`.
+4. Register `rag.search` as a native tool that requires explicit scopes.
+5. Add Ollama embedding adapter with automatic BM25 fallback.
+6. Add frontend Journal search UI that displays citations and retrieval status.
 
-This gives the fastest path from the current tested backend/frontend scaffold to a usable app that matches the new product direction.
+This adds RAG as Kairos's evidence retrieval layer while keeping the existing desktop app, Journal, Project Scope, and permission architecture intact.
