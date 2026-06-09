@@ -2,7 +2,7 @@
 
 This note records what Kairos is deliberately reusing from:
 
-- `E:\Code\claw0-main`
+- `E:\Code\openclaw`
 - `E:\Code\learn-claude-code`
 
 The goal is not to copy those repositories wholesale. Kairos should absorb the mechanisms that fit its product shape: a local-first personal companion that can also act as a coding agent.

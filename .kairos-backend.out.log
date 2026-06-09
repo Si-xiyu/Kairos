@@ -1,0 +1,4 @@
+Kairos FastAPI backend listening on http://127.0.0.1:8765
+Kairos root: E:\Code\Kairos
+INFO:     127.0.0.1:65273 - "GET /api/today HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65286 - "GET /api/health HTTP/1.1" 200 OK
